@@ -6,10 +6,19 @@ export type Trade = { id: number; pricePaise: number; quantity: number; buyerId:
 async function request(path: string, options: RequestInit = {}) {
   const { data, error } = await authClient.getSession();
   const token = data?.session?.token;
-  if (error || !token) throw new Error("Your session expired. Sign in again.");
+  if (error || !token) {
+    await authClient.signOut().catch(() => undefined);
+    throw new Error("Your session expired. Sign in again.");
+  }
   const response = await fetch(`${API}${path}`, { ...options, headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...options.headers } });
   const body = await response.json();
-  if (!response.ok) throw new Error(`${response.status} ${path}: ${body.error ?? "Request failed"}`);
+  if (!response.ok) {
+    if (response.status === 401) {
+      await authClient.signOut().catch(() => undefined);
+      throw new Error(body.error ?? "Session expired. Please sign in again.");
+    }
+    throw new Error(`${response.status} ${path}: ${body.error ?? "Request failed"}`);
+  }
   return body;
 }
 export const getBook = async (symbol: string) => request(`/api/books/${symbol}`) as Promise<Book>;

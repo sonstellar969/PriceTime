@@ -41,7 +41,7 @@ app.use("/api/*", async (c, next) => {
     const { payload } = await jwtVerify(authorization.slice(7), cachedJwks, { issuer: issuer() });
     if (!payload.sub) return c.json({ error: "Invalid session." }, 401);
     c.set("principal", { id: payload.sub, email: typeof payload.email === "string" ? payload.email : "", name: typeof payload.name === "string" ? payload.name : "Paper trader" });
-  } catch { return c.json({ error: "Your session expired. Sign in again." }, 401); }
+  } catch (error) { console.error("JWT verification failed:", error); return c.json({ error: "Your session expired. Sign in again." }, 401); }
   await next();
 });
 app.get("/api/symbols", c => c.json(symbols.map(symbol => ({ symbol, name: companyName(symbol), exchange: "BINANCE", currency: "INR", referencePricePaise: anchors[symbol] }))));

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { Activity, BarChart3, CandlestickChart, CircleDollarSign, LayoutDashboard, LogOut, Play, Wallet } from "lucide-react";
 import { authClient } from "./lib/auth";
@@ -22,7 +22,27 @@ function App() {
   const [page, setPage] = useState<Page>("Trade"); const [symbol, setSymbol] = useState("DOGE"); const [book, setBook] = useState<Book>(); const [account, setAccount] = useState<Account>(); const [orders, setOrders] = useState<OrderRow[]>([]); const [trades, setTrades] = useState<TradeRow[]>([]);
   const [side, setSide] = useState<"BUY" | "SELL">("BUY"); const [type, setType] = useState<"LIMIT" | "MARKET">("LIMIT"); const [quantity, setQuantity] = useState(5); const [price, setPrice] = useState("20.00"); const [busy, setBusy] = useState(false); const [notice, setNotice] = useState("");
   const current = symbols.find(item => item.symbol === symbol)!;
-  const refresh = async () => { try { const [nextBook, nextAccount, nextOrders, nextTrades] = await Promise.all([getBook(symbol), getAccount(), getOrders(), getTrades()]); setBook(nextBook); setAccount(nextAccount); setOrders(nextOrders); setTrades(nextTrades); } catch (error) { if (error instanceof Error) setNotice(error.message); } };
+  const refresh = async () => {
+    try {
+      const [bookRes, accountRes, ordersRes, tradesRes] = await Promise.allSettled([
+        getBook(symbol),
+        getAccount(),
+        getOrders(),
+        getTrades()
+      ]);
+      if (bookRes.status === "fulfilled") setBook(bookRes.value);
+      if (accountRes.status === "fulfilled") setAccount(accountRes.value);
+      if (ordersRes.status === "fulfilled") setOrders(ordersRes.value);
+      if (tradesRes.status === "fulfilled") setTrades(tradesRes.value);
+
+      const rejected = [bookRes, accountRes, ordersRes, tradesRes].find(r => r.status === "rejected") as PromiseRejectedResult | undefined;
+      if (rejected && rejected.reason instanceof Error) {
+        setNotice(rejected.reason.message);
+      }
+    } catch (error) {
+      if (error instanceof Error) setNotice(error.message);
+    }
+  };
   useEffect(() => { if (session?.user) void refresh(); else { setAccount(undefined); setBook(undefined); } }, [session?.user?.id, symbol]);
   useEffect(() => { if (!session?.user) return; const timer = window.setInterval(() => { void getBook(symbol).then(setBook).catch(() => undefined); void getAccount().then(setAccount).catch(() => undefined); }, 3000); return () => window.clearInterval(timer); }, [session?.user?.id, symbol]);
   useEffect(() => { setPrice((current.anchor / 100).toFixed(2)); }, [symbol]);
@@ -60,6 +80,7 @@ function App() {
     <aside className="sidebar"><a className="brand" href="#trade" onClick={() => setPage("Trade")}><CandlestickChart/><span>price<span>time</span></span></a><nav aria-label="Main navigation">{(["Trade", "Portfolio", "Reports", "Replay"] as Page[]).map((item, index) => { const Icon = [LayoutDashboard, Wallet, BarChart3, Play][index]; return <button key={item} className={page === item ? "nav-item active" : "nav-item"} onClick={() => setPage(item)}><Icon/>{item}</button>; })}</nav><div className="paper-note"><CircleDollarSign/><p>Paper account<br/><small>Demo cash · no real funds</small></p></div><button className="logout" onClick={signOut}><LogOut/> Sign out</button></aside>
     <section className="workspace"><header className="topbar"><div><p className="eyebrow">CRYPTO PAPER EXCHANGE</p><h1>{page === "Trade" ? "Trade desk" : page}</h1></div><div className="account-pill"><span className="status-dot"/>{session.user.name || session.user.email}<button type="button" onClick={signOut}>Sign out</button></div></header>
       <div className="ticker-strip">{symbols.map(item => <button key={item.symbol} className={symbol === item.symbol ? "ticker selected" : "ticker"} onClick={() => setSymbol(item.symbol)}><span>{item.symbol}</span><small>{item.market} · {item.name}</small></button>)}</div>
+      {notice && <div className="notice-banner" role="status"><p>{notice}</p><button type="button" onClick={() => setNotice("")}>✕</button></div>}
       {page === "Trade" && (() => {
         const currentPos = account?.positions.find(p => p.symbol === symbol);
         const currentUnits = currentPos?.units ?? 0;
@@ -96,9 +117,40 @@ function AuthScreen({ notice, setNotice }: { notice: string; setNotice: (message
 }
 
 function TradingViewChart({ symbol }: { symbol: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const tvSymbols: Record<string, string> = { DOGE: "BINANCE:DOGEUSDT", XRP: "BINANCE:XRPUSDT", ADA: "BINANCE:ADAUSDT", TRX: "BINANCE:TRXUSDT", AVAX: "BINANCE:AVAXUSDT" };
-  useEffect(() => { const mount = document.getElementById("tradingview-container"); if (!mount) return; mount.replaceChildren(); if (!tvSymbols[symbol]) return; const widget = document.createElement("div"); widget.className = "tradingview-widget-container__widget"; mount.append(widget); const script = document.createElement("script"); script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js"; script.async = true; script.type = "text/javascript"; script.innerHTML = JSON.stringify({ autosize: true, symbol: tvSymbols[symbol], interval: "D", timezone: "Asia/Kolkata", theme: "dark", style: "1", locale: "en", withdateranges: true, hide_side_toolbar: true, allow_symbol_change: false, calendar: false, support_host: "https://www.tradingview.com" }); mount.append(script); return () => mount.replaceChildren(); }, [symbol]);
-  return <div className="chart-frame"><div id="tradingview-container" className="tradingview-widget-container"/></div>;
+  useEffect(() => {
+    const mount = containerRef.current;
+    if (!mount) return;
+    mount.replaceChildren();
+    if (!tvSymbols[symbol]) return;
+    const widget = document.createElement("div");
+    widget.className = "tradingview-widget-container__widget";
+    widget.style.height = "100%";
+    widget.style.width = "100%";
+    mount.append(widget);
+    const script = document.createElement("script");
+    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+    script.async = true;
+    script.type = "text/javascript";
+    script.innerHTML = JSON.stringify({
+      autosize: true,
+      symbol: tvSymbols[symbol],
+      interval: "D",
+      timezone: "Etc/UTC",
+      theme: "dark",
+      style: "1",
+      locale: "en",
+      enable_publishing: false,
+      allow_symbol_change: false,
+      calendar: false,
+      hide_volume: true,
+      support_host: "https://www.tradingview.com"
+    });
+    mount.append(script);
+    return () => mount.replaceChildren();
+  }, [symbol]);
+  return <div className="chart-frame"><div ref={containerRef} className="tradingview-widget-container" style={{ height: "100%", width: "100%" }}/></div>;
 }
 function Metric({ label, value, tone }: { label: string; value: string; tone?: string }) { return <article className="metric"><p>{label}</p><strong className={tone ?? ""}>{value}</strong></article>; }
 function OrderBook({ book }: { book?: Book }) { return <section className="panel order-book"><div className="panel-heading"><h2>Order book</h2><span>Top five levels · aggregated</span></div><div className="depth-head"><span>Price (₹)</span><span>Qty</span></div><div className="levels asks">{[...(book?.asks ?? [])].reverse().map(level => <div className="depth-row" key={level.pricePaise}><span>{money(level.pricePaise)}</span><span>{level.quantity}</span><i style={{ width: `${Math.min(100, level.quantity * 2)}%` }}/></div>)}{!book?.asks?.length && <p className="empty">No sell orders</p>}</div><div className="spread-line">Spread <b>{money(book?.spreadPaise)}</b></div><div className="levels bids">{book?.bids?.map(level => <div className="depth-row" key={level.pricePaise}><span>{money(level.pricePaise)}</span><span>{level.quantity}</span><i style={{ width: `${Math.min(100, level.quantity * 2)}%` }}/></div>)}{!book?.bids?.length && <p className="empty">No buy orders</p>}</div></section>; }
