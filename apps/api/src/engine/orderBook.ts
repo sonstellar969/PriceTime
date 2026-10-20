@@ -30,7 +30,7 @@ export class PriceLevel {
   unlink(order: Order) { if (order.prev) order.prev.next = order.next; else this.head = order.next; if (order.next) order.next.prev = order.prev; else this.tail = order.prev; this.quantity -= order.remaining; this.orderCount--; order.prev = undefined; order.next = undefined; order.level = undefined; }
 }
 
-class PriceTree {
+export class PriceTree {
   root?: PriceLevel;
   find(price: number) { let node = this.root; while (node && node.pricePaise !== price) node = price < node.pricePaise ? node.left : node.right; return node; }
   insert(price: number) { if (!this.root) return (this.root = new PriceLevel(price)); let node = this.root; for (;;) { if (node.pricePaise === price) return node; const child = price < node.pricePaise ? "left" : "right"; if (!node[child]) { const inserted = new PriceLevel(price); inserted.parent = node; node[child] = inserted; return inserted; } node = node[child]; } }
@@ -54,6 +54,8 @@ export class OrderBook {
   peekNextOrderId() { return this.nextOrderId; }
   get recentPricesList(): CircularLinkedList<number> { return this.recentPrices; }
   get auditStack(): Stack<OrderAction> { return this.actionStack; }
+  get tradeHeadNode(): Trade | undefined { return this.tradeHead; }
+  get tradeTailNode(): Trade | undefined { return this.tradeTail; }
   getActionHistory(): OrderAction[] { return this.actionStack.toArray(); }
   peekLastAction(): OrderAction | undefined { return this.actionStack.peek(); }
   estimateMarketBuyCost(quantity: number) {

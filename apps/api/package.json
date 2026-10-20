@@ -6,7 +6,7 @@
     "build": "tsc -p tsconfig.json",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
     "db:migrate": "drizzle-kit migrate --config drizzle.config.ts",
-    "test": "tsx --test src/engine/orderBook.test.ts src/engine/dataStructures.test.ts src/engine/algorithms.test.ts src/engine/edgeCases.test.ts",
+    "test": "tsx --test src/engine/orderBook.test.ts src/engine/dataStructures.test.ts src/engine/algorithms.test.ts src/engine/edgeCases.test.ts src/engine/verify-all-topics.test.ts",
     "test:e2e": "tsx src/engine/e2e-all-features.test.ts"
   },
   "dependencies": {

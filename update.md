@@ -81,7 +81,8 @@ PriceTime tracks and renders Realized and Unrealized P/L in real time:
 - [x] Defensive `/api/account` query: joins user IDs by current auth token subject and verified email, providing defensive defaults for wallet balances and realized P&L to eliminate 500 errors.
 - [x] UI stability: background polling refresh warnings are logged to console without clobbering active user action banners, and open order filters cleanly expose all cancellable orders with positive remaining quantities.
 - [x] JSONB event log migration updating event payload trader IDs on user reconciliation.
-- [x] 26 unit and integration tests passing (`npm test`).
+- [x] Dedicated 14-topic verification test suite (`apps/api/src/engine/verify-all-topics.test.ts`) covering all 13 required course DS&A topics plus FIFO P&L calculations.
+- [x] 40 unit and integration tests passing (`npm test`).
 - [x] 9-stage end-to-end automated API feature test suite passing (`npm run test:e2e`).
 - [x] Production build passing (`npm run build`).
 
@@ -93,11 +94,12 @@ PriceTime tracks and renders Realized and Unrealized P/L in real time:
 
 ## Verified state
 
-- `npm test`: 26 comprehensive unit and integration tests pass across:
+- `npm test`: 40 comprehensive unit and integration tests pass across:
   - `src/engine/orderBook.test.ts` (price/time priority with partial fill, DLL middle cancellation, two-child BST deletion, 20-price circular moving average)
   - `src/engine/dataStructures.test.ts` (CircularLinkedList invariant `tail.next === head`, wraparound overwrite, moving average, Stack LIFO operations, DoublyLinkedQueue FIFO and unlinking)
   - `src/engine/algorithms.test.ts` (linearSearch, linearSearchFirst, binarySearch, Bubble, Selection, Insertion, Merge, and Quick sort on empty, singleton, reverse, duplicate, random, and trade records)
   - `src/engine/edgeCases.test.ts` (CLL pointer verification, linked Stack audit history, binarySearch O(log n) order lookup, market orders with zero/partial liquidity, multi-price level sweep, cancellation edge cases, OrderBook vs arrayReplay benchmark sequence equivalence, FIFO lots realized P/L)
+  - `src/engine/verify-all-topics.test.ts` (1-to-1 explicit verification tests for Linear Search, Binary Search, Singly Linked List, Circular Linked List, Doubly Linked List, FIFO Queue, LIFO Stack, BST, Bubble Sort, Selection Sort, Insertion Sort, Merge Sort, Quick Sort, and FIFO Lot P&L Accounting)
 - `npm run test:e2e`: 9-stage end-to-end integration test suite passes against the live running API:
   - 1. Health check & database connection
   - 2. Neon Auth user registration & EdDSA JWT issuance
