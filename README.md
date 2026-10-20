@@ -16,7 +16,7 @@ The chart widget uses exchange-qualified crypto symbols such as `BINANCE:DOGEUSD
 - First login provisions a ₹100,000 demo wallet and 10 demo units per supported crypto.
 - PostgreSQL persistence for profiles, demo wallets, reserved money/units, positions, FIFO lots, orders, executions, order events, realized P/L, and replay runs.
 - A deployed Neon Function API that authenticates Managed Auth JWTs, queries the pooled Postgres URL, and serializes order writes with a Postgres transaction lock.
-- Crypto order books: `BTC`, `ETH` (with `ETHUSD` alias), `DOGE`, `XRP`, `ADA`, `TRX`, and `AVAX`.
+- Crypto order books: `BTC`, `ETH`, `DOGE`, `XRP`, `ADA`, `TRX`, and `AVAX`.
 - Limit and market orders, price priority, FIFO time priority, partial fills, self-trade prevention, cancellation, integer-paise accounting, and cash/unit reservations.
 - Best bid/ask, spread, top-five levels, execution tape, and 20-trade circular moving average.
 - FIFO realized P/L and current holding cost basis; unrealized P/L uses the latest simulated fill.

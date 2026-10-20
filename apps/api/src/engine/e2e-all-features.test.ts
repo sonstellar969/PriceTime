@@ -93,14 +93,14 @@ async function runE2ETests() {
   assert.ok(btcBook.bids.length > 0, "BTC book must have maker bids");
   assert.ok(btcBook.asks.length > 0, "BTC book must have maker asks");
 
-  // Verify ETHUSD alias resolves to ETH book
-  const ethusdRes = await fetch(`${API_BASE}/api/books/ETHUSD`, { headers: authHeaders });
-  assert.equal(ethusdRes.status, 200);
-  const ethBook = await ethusdRes.json();
+  // Verify ETH book
+  const ethRes = await fetch(`${API_BASE}/api/books/ETH`, { headers: authHeaders });
+  assert.equal(ethRes.status, 200);
+  const ethBook = await ethRes.json();
   assert.equal(ethBook.symbol, "ETH");
   assert.ok(ethBook.bids.length > 0, "ETH book must have maker bids");
   assert.ok(ethBook.asks.length > 0, "ETH book must have maker asks");
-  console.log(`  ✔ DOGE, BTC & ETH (via ETHUSD alias) books loaded successfully.`);
+  console.log(`  ✔ DOGE, BTC & ETH books loaded successfully.`);
 
   // 6. Limit Order Placement & Reserve Logic
   console.log("\n[6/9] Placing Resting LIMIT BUY order (below market) & verifying cash reserve...");
@@ -140,21 +140,21 @@ async function runE2ETests() {
   assert.equal(accAfterCancel.wallet.availableCashPaise, 10_000_000, "Available cash should be fully refunded");
   console.log(`  ✔ Order #${restingOrderId} cancelled: ₹${expectedReserve / 100} refunded cleanly to available cash.`);
 
-  // Verify ETHUSD order placement and cancellation
+  // Verify ETH order placement and cancellation
   const ethOrderRes = await fetch(`${API_BASE}/api/orders`, {
     method: "POST",
     headers: authHeaders,
-    body: JSON.stringify({ symbol: "ETHUSD", side: "BUY", type: "LIMIT", quantity: 1, pricePaise: 2400000 }),
+    body: JSON.stringify({ symbol: "ETH", side: "BUY", type: "LIMIT", quantity: 1, pricePaise: 2400000 }),
   });
   assert.ok([200, 201].includes(ethOrderRes.status));
   const ethOrderData = await ethOrderRes.json();
-  assert.equal(ethOrderData.order.symbol, "ETH", "ETHUSD must be normalized to ETH in the matching engine");
-  const ethCancelRes = await fetch(`${API_BASE}/api/orders/ETHUSD/${ethOrderData.order.id}`, {
+  assert.equal(ethOrderData.order.symbol, "ETH");
+  const ethCancelRes = await fetch(`${API_BASE}/api/orders/ETH/${ethOrderData.order.id}`, {
     method: "DELETE",
     headers: authHeaders,
   });
   assert.equal(ethCancelRes.status, 200);
-  console.log("  ✔ ETHUSD order placement and cancellation verified with automatic symbol normalization to ETH.");
+  console.log("  ✔ ETH order placement and cancellation verified successfully.");
 
   // Verify BTC order placement and cancellation
   const btcOrderRes = await fetch(`${API_BASE}/api/orders`, {

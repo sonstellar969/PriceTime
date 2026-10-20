@@ -37,7 +37,7 @@ function isSymbol(value: string): value is SymbolType {
 function companyName(symbol: string) {
   return ({
     BTC: "Bitcoin",
-    ETH: "Ethereum (ETHUSD)",
+    ETH: "Ethereum",
     DOGE: "Dogecoin",
     XRP: "XRP",
     ADA: "Cardano",
@@ -93,8 +93,6 @@ app.use("/api/*", async (c, next) => {
 app.get("/api/symbols", c => c.json(symbols.map(symbol => ({
   symbol,
   name: companyName(symbol),
-  display: symbol === "ETH" ? "ETH / ETHUSD" : symbol,
-  alias: symbol === "ETH" ? "ETHUSD" : symbol === "BTC" ? "BTCUSD" : undefined,
   exchange: "BINANCE",
   currency: "INR",
   referencePricePaise: anchors[symbol]
