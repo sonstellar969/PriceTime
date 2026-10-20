@@ -8,8 +8,43 @@ import { z } from "zod";
 import { OrderBook, type OrderInput, type Side, type Trade } from "./engine/orderBook.js";
 import * as schema from "./db/schema.js";
 
-const symbols = ["DOGE", "XRP", "ADA", "TRX", "AVAX"] as const;
-const anchors: Record<(typeof symbols)[number], number> = { DOGE: 2000, XRP: 22000, ADA: 6000, TRX: 2800, AVAX: 250000 };
+const symbols = ["BTC", "ETH", "DOGE", "XRP", "ADA", "TRX", "AVAX"] as const;
+type SymbolType = (typeof symbols)[number];
+
+const anchors: Record<SymbolType, number> = {
+  BTC: 7500000,
+  ETH: 2500000,
+  DOGE: 2000,
+  XRP: 22000,
+  ADA: 6000,
+  TRX: 2800,
+  AVAX: 250000
+};
+
+export function normalizeSymbol(value: unknown): SymbolType | undefined {
+  if (typeof value !== "string") return undefined;
+  const upper = value.toUpperCase().trim();
+  if (upper === "ETHUSD" || upper === "ETH-USD" || upper === "ETH_USD") return "ETH";
+  if (upper === "BTCUSD" || upper === "BTC-USD" || upper === "BTC_USD") return "BTC";
+  if (symbols.includes(upper as SymbolType)) return upper as SymbolType;
+  return undefined;
+}
+
+function isSymbol(value: string): value is SymbolType {
+  return normalizeSymbol(value) !== undefined;
+}
+
+function companyName(symbol: string) {
+  return ({
+    BTC: "Bitcoin",
+    ETH: "Ethereum (ETHUSD)",
+    DOGE: "Dogecoin",
+    XRP: "XRP",
+    ADA: "Cardano",
+    TRX: "TRON",
+    AVAX: "Avalanche"
+  } as Record<string, string>)[symbol] ?? symbol;
+}
 const makerId = "paper-market-maker";
 const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 5, idleTimeoutMillis: 20_000 });
 attachDatabasePool(pool);
@@ -19,7 +54,18 @@ void database; // Drizzle schema is the typed source of truth; pg transactions b
 type Principal = { id: string; email: string; name: string };
 type Vars = { principal: Principal };
 type ReplayPayload = OrderInput & { orderId: number };
-const orderRequest = z.object({ symbol: z.enum(symbols), side: z.enum(["BUY", "SELL"]), type: z.enum(["LIMIT", "MARKET"]), quantity: z.number().int().positive().max(1_000_000), pricePaise: z.number().int().positive().max(100_000_000).optional() }).superRefine((value, ctx) => { if (value.type === "LIMIT" && !value.pricePaise) ctx.addIssue({ code: "custom", path: ["pricePaise"], message: "Limit orders need a price." }); });
+const orderRequest = z.object({
+  symbol: z.string().transform(s => {
+    const norm = normalizeSymbol(s);
+    return norm ?? s;
+  }).pipe(z.enum(symbols)),
+  side: z.enum(["BUY", "SELL"]),
+  type: z.enum(["LIMIT", "MARKET"]),
+  quantity: z.number().int().positive().max(1_000_000),
+  pricePaise: z.number().int().positive().max(1_000_000_000).optional()
+}).superRefine((value, ctx) => {
+  if (value.type === "LIMIT" && !value.pricePaise) ctx.addIssue({ code: "custom", path: ["pricePaise"], message: "Limit orders need a price." });
+});
 const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? "http://localhost:5173").split(",").map(value => value.trim());
 const app = new Hono<{ Variables: Vars }>();
 const jwks = () => createRemoteJWKSet(new URL(requiredEnv("NEON_AUTH_JWKS_URL")));
@@ -44,7 +90,15 @@ app.use("/api/*", async (c, next) => {
   } catch (error) { console.error("JWT verification failed:", error); return c.json({ error: "Your session expired. Sign in again." }, 401); }
   await next();
 });
-app.get("/api/symbols", c => c.json(symbols.map(symbol => ({ symbol, name: companyName(symbol), exchange: "BINANCE", currency: "INR", referencePricePaise: anchors[symbol] }))));
+app.get("/api/symbols", c => c.json(symbols.map(symbol => ({
+  symbol,
+  name: companyName(symbol),
+  display: symbol === "ETH" ? "ETH / ETHUSD" : symbol,
+  alias: symbol === "ETH" ? "ETHUSD" : symbol === "BTC" ? "BTCUSD" : undefined,
+  exchange: "BINANCE",
+  currency: "INR",
+  referencePricePaise: anchors[symbol]
+}))));
 app.get("/api/account", async c => {
   await bootstrap();
   const client = await pool.connect();
@@ -121,11 +175,23 @@ app.get("/api/account", async c => {
   } finally { client.release(); }
 });
 app.get("/api/books", async c => { await bootstrap(); const snapshots = await Promise.all(symbols.map(symbol => readBook(symbol))); return c.json(snapshots); });
-app.get("/api/books/:symbol", async c => { const symbol = c.req.param("symbol"); if (!isSymbol(symbol)) return c.json({ error: "Unknown symbol." }, 404); await bootstrap(); return c.json(await readBook(symbol)); });
+app.get("/api/books/:symbol", async c => {
+  const norm = normalizeSymbol(c.req.param("symbol"));
+  if (!norm) return c.json({ error: "Unknown symbol." }, 404);
+  await bootstrap();
+  return c.json(await readBook(norm));
+});
 app.get("/api/trades", async c => {
-  const user = c.get("principal"); const symbol = c.req.query("symbol");
-  const values: unknown[] = [user.id, user.email || ""]; const symbolClause = symbol && isSymbol(symbol) ? " and symbol=$3" : ""; if (symbolClause) values.push(symbol);
-  const result = await pool.query(`select symbol,trade_id,price_paise,quantity,buyer_id,seller_id,created_at from mf_trades where (buyer_id=$1 or seller_id=$1 or buyer_id in (select id from mf_users where email=$2) or seller_id in (select id from mf_users where email=$2))${symbolClause} order by created_at desc limit 1000`, values);
+  const user = c.get("principal");
+  const rawSymbol = c.req.query("symbol");
+  const symbol = rawSymbol ? normalizeSymbol(rawSymbol) : undefined;
+  const values: unknown[] = [user.id, user.email || ""];
+  const symbolClause = symbol ? " and symbol=$3" : "";
+  if (symbolClause) values.push(symbol);
+  const result = await pool.query(
+    `select symbol,trade_id,price_paise,quantity,buyer_id,seller_id,created_at from mf_trades where (buyer_id=$1 or seller_id=$1 or buyer_id in (select id from mf_users where email=$2) or seller_id in (select id from mf_users where email=$2))${symbolClause} order by created_at desc limit 1000`,
+    values
+  );
   return c.json(result.rows);
 });
 app.get("/api/orders", async c => {
@@ -182,8 +248,9 @@ app.post("/api/orders", async c => {
 });
 
 app.delete("/api/orders/:symbol/:id", async c => {
-  const symbol = c.req.param("symbol"), orderId = Number(c.req.param("id"));
-  if (!isSymbol(symbol) || !Number.isInteger(orderId)) return c.json({ error: "Invalid order." }, 400);
+  const rawSymbol = c.req.param("symbol"), orderId = Number(c.req.param("id"));
+  const symbol = normalizeSymbol(rawSymbol);
+  if (!symbol || !Number.isInteger(orderId)) return c.json({ error: "Invalid order." }, 400);
   await bootstrap();
   const client = await pool.connect();
   try {
@@ -229,7 +296,9 @@ app.delete("/api/orders/:symbol/:id", async c => {
 });
 
 app.post("/api/replay", async c => {
-  const symbolValue = c.req.query("symbol") ?? "DOGE"; if (!isSymbol(symbolValue)) return c.json({ error: "Unknown symbol." }, 400);
+  const rawSymbol = c.req.query("symbol") ?? "BTC";
+  const symbolValue = normalizeSymbol(rawSymbol);
+  if (!symbolValue) return c.json({ error: "Unknown symbol." }, 400);
   const csv = await c.req.text(); if (csv.length > 2_000_000) return c.json({ error: "CSV must be smaller than 2 MB." }, 413);
   const parsed = parseReplay(csv, symbolValue); if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const startedTree = performance.now(); const tree = new OrderBook(symbolValue); for (const order of parsed.orders) tree.submit(order); const treeMs = Math.max(0.01, performance.now() - startedTree);
@@ -398,7 +467,5 @@ export function arrayReplay(inputs: OrderInput[]): ReplayTrade[] {
   }
   return trades;
 }
-function isSymbol(value: string): value is (typeof symbols)[number] { return symbols.includes(value as (typeof symbols)[number]); }
-function companyName(symbol: string) { return ({ DOGE: "Dogecoin", XRP: "XRP", ADA: "Cardano", TRX: "TRON", AVAX: "Avalanche" } as Record<string, string>)[symbol] ?? symbol; }
 
 export default { fetch: (request: Request) => app.fetch(request) };

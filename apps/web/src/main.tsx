@@ -8,21 +8,23 @@ import { bubbleSort, selectionSort, insertionSort, mergeSort, quickSort } from "
 import "./styles.css";
 
 const symbols = [
-  { symbol: "DOGE", name: "Dogecoin", market: "BINANCE", anchor: 2000 },
-  { symbol: "XRP", name: "XRP", market: "BINANCE", anchor: 22000 },
-  { symbol: "ADA", name: "Cardano", market: "BINANCE", anchor: 6000 },
-  { symbol: "TRX", name: "TRON", market: "BINANCE", anchor: 2800 },
-  { symbol: "AVAX", name: "Avalanche", market: "BINANCE", anchor: 250000 },
+  { symbol: "BTC", display: "BTC", name: "Bitcoin", market: "BINANCE", anchor: 7500000 },
+  { symbol: "ETH", display: "ETH / ETHUSD", name: "Ethereum (ETHUSD)", market: "BINANCE", anchor: 2500000 },
+  { symbol: "DOGE", display: "DOGE", name: "Dogecoin", market: "BINANCE", anchor: 2000 },
+  { symbol: "XRP", display: "XRP", name: "XRP", market: "BINANCE", anchor: 22000 },
+  { symbol: "ADA", display: "ADA", name: "Cardano", market: "BINANCE", anchor: 6000 },
+  { symbol: "TRX", display: "TRX", name: "TRON", market: "BINANCE", anchor: 2800 },
+  { symbol: "AVAX", display: "AVAX", name: "Avalanche", market: "BINANCE", anchor: 250000 },
 ];
 type Page = "Trade" | "Portfolio" | "Reports" | "Replay";
 type SortName = "Bubble" | "Selection" | "Insertion" | "Merge" | "Quick";
 
 function App() {
   const { data: session, isPending: checkingSession } = authClient.useSession();
-  const [page, setPage] = useState<Page>("Trade"); const [symbol, setSymbol] = useState("DOGE"); const [book, setBook] = useState<Book>(); const [account, setAccount] = useState<Account>(); const [orders, setOrders] = useState<OrderRow[]>([]); const [trades, setTrades] = useState<TradeRow[]>([]);
+  const [page, setPage] = useState<Page>("Trade"); const [symbol, setSymbol] = useState("BTC"); const [book, setBook] = useState<Book>(); const [account, setAccount] = useState<Account>(); const [orders, setOrders] = useState<OrderRow[]>([]); const [trades, setTrades] = useState<TradeRow[]>([]);
   const [showAllOpenOrders, setShowAllOpenOrders] = useState(false);
-  const [side, setSide] = useState<"BUY" | "SELL">("BUY"); const [type, setType] = useState<"LIMIT" | "MARKET">("LIMIT"); const [quantity, setQuantity] = useState(5); const [price, setPrice] = useState("20.00"); const [busy, setBusy] = useState(false); const [notice, setNotice] = useState("");
-  const current = symbols.find(item => item.symbol === symbol)!;
+  const [side, setSide] = useState<"BUY" | "SELL">("BUY"); const [type, setType] = useState<"LIMIT" | "MARKET">("LIMIT"); const [quantity, setQuantity] = useState(1); const [price, setPrice] = useState("75000.00"); const [busy, setBusy] = useState(false); const [notice, setNotice] = useState("");
+  const current = symbols.find(item => item.symbol === symbol || (item.symbol === "ETH" && symbol === "ETHUSD")) ?? symbols[0];
   const refresh = async () => {
     try {
       const [bookRes, accountRes, ordersRes, tradesRes] = await Promise.allSettled([
@@ -92,7 +94,7 @@ function App() {
   return <main className="app-shell">
     <aside className="sidebar"><a className="brand" href="#trade" onClick={() => setPage("Trade")}><CandlestickChart/><span>price<span>time</span></span></a><nav aria-label="Main navigation">{(["Trade", "Portfolio", "Reports", "Replay"] as Page[]).map((item, index) => { const Icon = [LayoutDashboard, Wallet, BarChart3, Play][index]; return <button key={item} className={page === item ? "nav-item active" : "nav-item"} onClick={() => setPage(item)}><Icon/>{item}</button>; })}</nav><div className="paper-note"><CircleDollarSign/><p>Paper account<br/><small>Demo cash · no real funds</small></p></div><button className="logout" onClick={signOut}><LogOut/> Sign out</button></aside>
     <section className="workspace"><header className="topbar"><div><p className="eyebrow">CRYPTO PAPER EXCHANGE</p><h1>{page === "Trade" ? "Trade desk" : page}</h1></div><div className="account-pill"><span className="status-dot"/>{session.user.name || session.user.email}<button type="button" onClick={signOut}>Sign out</button></div></header>
-      <div className="ticker-strip">{symbols.map(item => <button key={item.symbol} className={symbol === item.symbol ? "ticker selected" : "ticker"} onClick={() => setSymbol(item.symbol)}><span>{item.symbol}</span><small>{item.market} · {item.name}</small></button>)}</div>
+      <div className="ticker-strip">{symbols.map(item => <button key={item.symbol} className={symbol === item.symbol ? "ticker selected" : "ticker"} onClick={() => setSymbol(item.symbol)}><span>{item.display}</span><small>{item.market} · {item.name}</small></button>)}</div>
       {notice && <div className="notice-banner" role="status"><p>{notice}</p><button type="button" onClick={() => setNotice("")}>✕</button></div>}
       {page === "Trade" && (() => {
         const currentPos = account?.positions.find(p => p.symbol === symbol);
@@ -110,7 +112,7 @@ function App() {
             <Metric label={`Unrealized P/L (${symbol})`} value={money(currentUnrealized)} tone={currentUnrealized >= 0 ? "green" : "red"}/>
             <Metric label={`Holding (${symbol})`} value={`${currentUnits} units`}/>
           </div>
-          <div className="dashboard-grid"><section className="panel chart-panel"><div className="panel-heading"><div><h2>{current.name} <span className="symbol-tag">{symbol}</span></h2><p>Binance crypto chart</p></div><span className="live-tag"><i/> LIVE CHART</span></div><TradingViewChart symbol={symbol}/><div className="market-note">TradingView charts the Binance crypto pair in USDT. PriceTime order books use separate demo reference prices in INR; fills never route to an exchange.</div></section>
+          <div className="dashboard-grid"><section className="panel chart-panel"><div className="panel-heading"><div><h2>{current.name} <span className="symbol-tag">{current.display}</span></h2><p>Binance crypto chart</p></div><span className="live-tag"><i/> LIVE CHART</span></div><TradingViewChart symbol={symbol}/><div className="market-note">TradingView charts the Binance crypto pair in USDT. PriceTime order books use separate demo reference prices in INR; fills never route to an exchange.</div></section>
             <section className="panel ticket"><div className="panel-heading"><h2>Place order</h2><span>{money(account?.wallet.availableCashPaise)} available</span></div><form onSubmit={submitOrder}><div className="side-toggle"><button type="button" className={side === "BUY" ? "active buy" : ""} onClick={() => setSide("BUY")}>Buy</button><button type="button" className={side === "SELL" ? "active sell" : ""} onClick={() => setSide("SELL")}>Sell</button></div><label htmlFor="order-type">Order type</label><select id="order-type" value={type} onChange={event => setType(event.target.value as "LIMIT" | "MARKET")}><option value="LIMIT">Limit</option><option value="MARKET">Market</option></select><label htmlFor="order-quantity">Quantity <small>Available: {account?.positions.find(position => position.symbol === symbol)?.availableUnits ?? 0} units</small></label><input id="order-quantity" min="1" step="1" type="number" value={quantity} onChange={event => setQuantity(Number(event.target.value))}/>{type === "LIMIT" && <><label htmlFor="limit-price">Limit price <small>₹ INR</small></label><input id="limit-price" inputMode="decimal" min="0.01" step="0.01" type="number" value={price} onChange={event => setPrice(event.target.value)}/></>}<button className={`submit-order ${side.toLowerCase()}`} disabled={busy}>{busy ? "Working…" : `Place ${side.toLowerCase()} order`}</button><p className="demo-disclaimer">Simulated fills only. This does not route to a real exchange.</p></form></section>
             <OrderBook book={book}/><section className="panel trade-tape"><div className="panel-heading"><h2>Recent executions</h2><span>20-trade average: {money(book?.movingAveragePaise)}</span></div><TradeTable trades={book?.recentTrades?.map(trade => ({ symbol, trade_id: trade.id, price_paise: trade.pricePaise, quantity: trade.quantity, buyer_id: trade.buyerId, seller_id: trade.sellerId, created_at: new Date(trade.createdAt).toISOString() })) ?? []}/></section>
             <section className="panel orders-panel">
@@ -165,7 +167,17 @@ function AuthScreen({ notice, setNotice }: { notice: string; setNotice: (message
 
 function TradingViewChart({ symbol }: { symbol: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const tvSymbols: Record<string, string> = { DOGE: "BINANCE:DOGEUSDT", XRP: "BINANCE:XRPUSDT", ADA: "BINANCE:ADAUSDT", TRX: "BINANCE:TRXUSDT", AVAX: "BINANCE:AVAXUSDT" };
+  const tvSymbols: Record<string, string> = {
+    BTC: "BINANCE:BTCUSDT",
+    BTCUSD: "BINANCE:BTCUSDT",
+    ETH: "BINANCE:ETHUSDT",
+    ETHUSD: "BINANCE:ETHUSDT",
+    DOGE: "BINANCE:DOGEUSDT",
+    XRP: "BINANCE:XRPUSDT",
+    ADA: "BINANCE:ADAUSDT",
+    TRX: "BINANCE:TRXUSDT",
+    AVAX: "BINANCE:AVAXUSDT"
+  };
   useEffect(() => {
     const mount = containerRef.current;
     if (!mount) return;

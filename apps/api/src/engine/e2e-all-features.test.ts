@@ -22,8 +22,8 @@ async function runE2ETests() {
   const healthData = await healthRes.json();
   assert.equal(healthData.status, "ok");
   assert.equal(healthData.database, "neondb");
-  assert.deepEqual(healthData.symbols, ["DOGE", "XRP", "ADA", "TRX", "AVAX"]);
-  console.log("  ✔ /health returned 200 OK with connected DB and 5 crypto symbols.");
+  assert.deepEqual(healthData.symbols, ["BTC", "ETH", "DOGE", "XRP", "ADA", "TRX", "AVAX"]);
+  console.log("  ✔ /health returned 200 OK with connected DB and 7 crypto symbols.");
 
   // 2. Auth: Register test user and acquire JWT
   console.log("\n[2/9] Registering isolated test trader & acquiring JWT...");
@@ -51,8 +51,8 @@ async function runE2ETests() {
   const symbolsRes = await fetch(`${API_BASE}/api/symbols`, { headers: authHeaders });
   assert.equal(symbolsRes.status, 200);
   const symbolsData = await symbolsRes.json();
-  assert.equal(symbolsData.length, 5);
-  console.log("  ✔ /api/symbols returned metadata for DOGE, XRP, ADA, TRX, AVAX.");
+  assert.equal(symbolsData.length, 7);
+  console.log("  ✔ /api/symbols returned metadata for BTC, ETH, DOGE, XRP, ADA, TRX, AVAX.");
 
   // 4. Account Bootstrap & Portfolio
   console.log("\n[4/9] Testing /api/account initial state...");
@@ -62,21 +62,21 @@ async function runE2ETests() {
   assert.equal(account.user.email, testEmail);
   assert.equal(account.wallet.availableCashPaise, 10_000_000, "Initial demo cash should be ₹100,000.00 (10,000,000 paise)");
   assert.equal(account.wallet.reservedCashPaise, 0);
-  assert.equal(account.positions.length, 5);
+  assert.equal(account.positions.length, 7);
   for (const pos of account.positions) {
     assert.equal(pos.availableUnits, 10, `${pos.symbol} should start with 10 units`);
     assert.equal(pos.reservedUnits, 0);
     assert.equal(pos.units, 10);
   }
   assert.equal(account.realizedPaise, 0, "Initial realized P/L should be 0");
-  console.log("  ✔ Account bootstrap verified: ₹100,000 cash, 10 units each in 5 assets, 0 realized P&L.");
+  console.log("  ✔ Account bootstrap verified: ₹100,000 cash, 10 units each in 7 assets (including BTC & ETH), 0 realized P&L.");
 
   // 5. Order Book Snapshots
-  console.log("\n[5/9] Testing /api/books and /api/books/DOGE...");
+  console.log("\n[5/9] Testing /api/books and /api/books/DOGE, /api/books/BTC, /api/books/ETHUSD...");
   const booksRes = await fetch(`${API_BASE}/api/books`, { headers: authHeaders });
   assert.equal(booksRes.status, 200);
   const books = await booksRes.json();
-  assert.equal(books.length, 5);
+  assert.equal(books.length, 7);
 
   const dogeRes = await fetch(`${API_BASE}/api/books/DOGE`, { headers: authHeaders });
   assert.equal(dogeRes.status, 200);
@@ -84,7 +84,23 @@ async function runE2ETests() {
   assert.equal(dogeBook.symbol, "DOGE");
   assert.ok(dogeBook.bids.length > 0, "DOGE book must have maker bids");
   assert.ok(dogeBook.asks.length > 0, "DOGE book must have maker asks");
-  console.log(`  ✔ DOGE book loaded: Best Bid = ₹${(dogeBook.bestBid! / 100).toFixed(2)}, Best Ask = ₹${(dogeBook.bestAsk! / 100).toFixed(2)}, Spread = ₹${(dogeBook.spreadPaise! / 100).toFixed(2)}`);
+
+  // Verify BTC book
+  const btcRes = await fetch(`${API_BASE}/api/books/BTC`, { headers: authHeaders });
+  assert.equal(btcRes.status, 200);
+  const btcBook = await btcRes.json();
+  assert.equal(btcBook.symbol, "BTC");
+  assert.ok(btcBook.bids.length > 0, "BTC book must have maker bids");
+  assert.ok(btcBook.asks.length > 0, "BTC book must have maker asks");
+
+  // Verify ETHUSD alias resolves to ETH book
+  const ethusdRes = await fetch(`${API_BASE}/api/books/ETHUSD`, { headers: authHeaders });
+  assert.equal(ethusdRes.status, 200);
+  const ethBook = await ethusdRes.json();
+  assert.equal(ethBook.symbol, "ETH");
+  assert.ok(ethBook.bids.length > 0, "ETH book must have maker bids");
+  assert.ok(ethBook.asks.length > 0, "ETH book must have maker asks");
+  console.log(`  ✔ DOGE, BTC & ETH (via ETHUSD alias) books loaded successfully.`);
 
   // 6. Limit Order Placement & Reserve Logic
   console.log("\n[6/9] Placing Resting LIMIT BUY order (below market) & verifying cash reserve...");
@@ -123,6 +139,38 @@ async function runE2ETests() {
   assert.equal(accAfterCancel.wallet.reservedCashPaise, 0, "Reserved cash should return to 0");
   assert.equal(accAfterCancel.wallet.availableCashPaise, 10_000_000, "Available cash should be fully refunded");
   console.log(`  ✔ Order #${restingOrderId} cancelled: ₹${expectedReserve / 100} refunded cleanly to available cash.`);
+
+  // Verify ETHUSD order placement and cancellation
+  const ethOrderRes = await fetch(`${API_BASE}/api/orders`, {
+    method: "POST",
+    headers: authHeaders,
+    body: JSON.stringify({ symbol: "ETHUSD", side: "BUY", type: "LIMIT", quantity: 1, pricePaise: 2400000 }),
+  });
+  assert.ok([200, 201].includes(ethOrderRes.status));
+  const ethOrderData = await ethOrderRes.json();
+  assert.equal(ethOrderData.order.symbol, "ETH", "ETHUSD must be normalized to ETH in the matching engine");
+  const ethCancelRes = await fetch(`${API_BASE}/api/orders/ETHUSD/${ethOrderData.order.id}`, {
+    method: "DELETE",
+    headers: authHeaders,
+  });
+  assert.equal(ethCancelRes.status, 200);
+  console.log("  ✔ ETHUSD order placement and cancellation verified with automatic symbol normalization to ETH.");
+
+  // Verify BTC order placement and cancellation
+  const btcOrderRes = await fetch(`${API_BASE}/api/orders`, {
+    method: "POST",
+    headers: authHeaders,
+    body: JSON.stringify({ symbol: "BTC", side: "BUY", type: "LIMIT", quantity: 1, pricePaise: 7400000 }),
+  });
+  assert.ok([200, 201].includes(btcOrderRes.status));
+  const btcOrderData = await btcOrderRes.json();
+  assert.equal(btcOrderData.order.symbol, "BTC");
+  const btcCancelRes = await fetch(`${API_BASE}/api/orders/BTC/${btcOrderData.order.id}`, {
+    method: "DELETE",
+    headers: authHeaders,
+  });
+  assert.equal(btcCancelRes.status, 200);
+  console.log("  ✔ BTC order placement and cancellation verified successfully.");
 
   // 8. Trade Execution & FIFO P/L Calculation
   console.log("\n[8/9] Executing SELL trade against maker bid to verify FIFO Realized P/L...");

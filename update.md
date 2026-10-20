@@ -32,7 +32,7 @@ This file tracks the data structures and algorithms implementation and verificat
 - Neon Managed Auth sign-up/sign-in/session restoration/sign-out. API calls use the JWT on the session returned by `authClient.getSession()`.
 - Neon Postgres persistence for users, demo cash, crypto units, reserved balances, orders, order events, executions, FIFO lots/P&L, and replay runs. Engine state is rebuilt from order events when the API needs to match.
 - Neon Function API for authenticated account, book, order, cancellation, trade, and replay operations.
-- Supported demo symbols: DOGE, XRP, ADA, TRX, AVAX. Price-time matching supports limit/market orders, price priority, FIFO priority, partial fills, cancellation, and integer-paise accounting.
+- Supported demo symbols: BTC, ETH (with ETHUSD alias), DOGE, XRP, ADA, TRX, AVAX. Price-time matching supports limit/market orders, price priority, FIFO priority, partial fills, cancellation, and integer-paise accounting.
 - Top-five order-book levels, bid/ask spread, trade tape, recent-trade moving average using a real Circular Linked List (CLL), cash/units validation, portfolio, and FIFO realized P/L.
 - Reusable linear and binary search algorithms, plus five standalone sorting algorithms (Bubble, Selection, Insertion, Merge, Quick) driving trade reports with millisecond execution timing.
 - CSV replay up to 10,000 orders, comparing BST/DLL matching with a plain-array baseline and verifying identical trade execution sequences (counts, prices, and quantities).
@@ -73,7 +73,7 @@ PriceTime tracks and renders Realized and Unrealized P/L in real time:
 - [x] Real-time P&L tracking (Realized FIFO P/L, Unrealized P/L, Net P/L) on Trade desk and Portfolio.
 - [x] Full matching engine edge cases: market buy/sell with zero liquidity, partial liquidity, multi-price level sweeps, head/middle/tail cancellation.
 - [x] Replay benchmark verifying exact trade sequence, price, and quantity equivalence against the plain-array baseline.
-- [x] TradingView live crypto chart widgets for all 5 coins (DOGE, XRP, ADA, TRX, AVAX).
+- [x] TradingView live crypto chart widgets for all 7 coins (BTC, ETH/ETHUSD, DOGE, XRP, ADA, TRX, AVAX).
 - [x] Neon Managed Auth integration and Postgres transactional persistence.
 - [x] Account identity reconciliation and foreign key `ON UPDATE CASCADE` migration ensuring seamless session logins without `mf_users_email_idx` unique violations.
 - [x] Event-sourced order ID alignment: `OrderBook.submit()` preserves order IDs stored in events during replay, preventing monotonic ID desync and guaranteeing O(log n) binary search cancellation accuracy.
@@ -82,6 +82,7 @@ PriceTime tracks and renders Realized and Unrealized P/L in real time:
 - [x] UI stability: background polling refresh warnings are logged to console without clobbering active user action banners, and open order filters cleanly expose all cancellable orders with positive remaining quantities.
 - [x] JSONB event log migration updating event payload trader IDs on user reconciliation.
 - [x] Dedicated 14-topic verification test suite (`apps/api/src/engine/verify-all-topics.test.ts`) covering all 13 required course DS&A topics plus FIFO P&L calculations.
+- [x] Multi-crypto expansion: Added BTC (Bitcoin) and ETH (Ethereum, with ETHUSD alias support) across matching engine, database, and Binance TradingView chart widgets.
 - [x] 40 unit and integration tests passing (`npm test`).
 - [x] 9-stage end-to-end automated API feature test suite passing (`npm run test:e2e`).
 - [x] Production build passing (`npm run build`).
@@ -90,7 +91,6 @@ PriceTime tracks and renders Realized and Unrealized P/L in real time:
 - [ ] Historical P/L equity curve chart over time (currently shows live cumulative Realized & Unrealized P/L numbers).
 - [ ] Snapshotting/checkpointing the event stream for very high volume production (classroom scale replays full event log safely).
 - [ ] Email verification & password reset SMTP configuration for open public registration (class demo uses instant email/password auth).
-- [ ] Additional crypto symbols beyond DOGE, XRP, ADA, TRX, and AVAX.
 
 ## Verified state
 
