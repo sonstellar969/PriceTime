@@ -334,3 +334,8 @@ Still pending / sensible next steps: add broader automated integration tests for
 ## Project purpose
 
 Educational demonstration of BSTs, doubly linked FIFO queues, binary search, singly linked trade history, circular buffers, FIFO accounting, sorting/searching, database persistence, API authentication, and web UI integration. No deposits, withdrawals, brokerage routing, live order execution, or investment advice.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
