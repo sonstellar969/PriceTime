@@ -6,7 +6,7 @@ Repository: `sonstellar969/PriceTime`
 
 Live site: <https://sonstellar969.github.io/PriceTime/>
 
-Main branch at this handoff: `a8c2a15` (`Update PriceTime deployment handoff status`)
+App/status baseline before this handoff document: `a8c2a15` (`Update PriceTime deployment handoff status`)
 
 This file is the continuation brief for the next coding agent (Agy CLI). **PriceTime is the project name.** The goal is a full, hosted, multi-crypto paper-trading website backed by Neon Postgres, with an exchange-style matching engine that visibly demonstrates the required data structures and algorithms. All trading is fake/demo money; there must be no real exchange execution, deposit, or withdrawal feature.
 
