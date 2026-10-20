@@ -7,6 +7,10 @@ import { linearSearch } from "./algorithms/search";
 import { bubbleSort, selectionSort, insertionSort, mergeSort, quickSort } from "./algorithms/sorts";
 import "./styles.css";
 
+// Trigger early background warmup of Neon serverless Postgres & API compute
+const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3001";
+void fetch(`${API_URL}/health`).catch(() => undefined);
+
 const symbols = [
   { symbol: "BTC", name: "Bitcoin", market: "BINANCE", anchor: 7500000 },
   { symbol: "ETH", name: "Ethereum", market: "BINANCE", anchor: 2500000 },
@@ -104,9 +108,9 @@ function App() {
         return <>
           <div className="metrics">
             <Metric label="Last simulated trade" value={money(book?.lastPricePaise ?? current.anchor)}/>
-            <Metric label="Best bid" value={money(book?.bestBid)} tone="green"/>
-            <Metric label="Best ask" value={money(book?.bestAsk)} tone="red"/>
-            <Metric label="Spread" value={money(book?.spreadPaise)}/>
+            <Metric label="Best bid" value={book ? money(book.bestBid) : "Syncing…"} tone="green"/>
+            <Metric label="Best ask" value={book ? money(book.bestAsk) : "Syncing…"} tone="red"/>
+            <Metric label="Spread" value={book ? money(book.spreadPaise) : "Syncing…"}/>
             <Metric label="Demo cash available" value={money(account?.wallet.availableCashPaise)}/>
             <Metric label="Realized FIFO P/L" value={money(totalRealized)} tone={totalRealized >= 0 ? "green" : "red"}/>
             <Metric label={`Unrealized P/L (${symbol})`} value={money(currentUnrealized)} tone={currentUnrealized >= 0 ? "green" : "red"}/>
@@ -207,7 +211,15 @@ function TradingViewChart({ symbol }: { symbol: string }) {
     mount.append(script);
     return () => mount.replaceChildren();
   }, [symbol]);
-  return <div className="chart-frame"><div ref={containerRef} className="tradingview-widget-container" style={{ height: "100%", width: "100%" }}/></div>;
+  return (
+    <div className="chart-frame">
+      <div className="chart-placeholder">
+        <CandlestickChart />
+        <span>Connecting to Binance {tvSymbols[symbol] ?? symbol} feed…</span>
+      </div>
+      <div ref={containerRef} className="tradingview-widget-container" style={{ height: "100%", width: "100%", position: "relative", zIndex: 1 }}/>
+    </div>
+  );
 }
 function Metric({ label, value, tone }: { label: string; value: string; tone?: string }) { return <article className="metric"><p>{label}</p><strong className={tone ?? ""}>{value}</strong></article>; }
 function OrderBook({ book }: { book?: Book }) { return <section className="panel order-book"><div className="panel-heading"><h2>Order book</h2><span>Top five levels · aggregated</span></div><div className="depth-head"><span>Price (₹)</span><span>Qty</span></div><div className="levels asks">{[...(book?.asks ?? [])].reverse().map(level => <div className="depth-row" key={level.pricePaise}><span>{money(level.pricePaise)}</span><span>{level.quantity}</span><i style={{ width: `${Math.min(100, level.quantity * 2)}%` }}/></div>)}{!book?.asks?.length && <p className="empty">No sell orders</p>}</div><div className="spread-line">Spread <b>{money(book?.spreadPaise)}</b></div><div className="levels bids">{book?.bids?.map(level => <div className="depth-row" key={level.pricePaise}><span>{money(level.pricePaise)}</span><span>{level.quantity}</span><i style={{ width: `${Math.min(100, level.quantity * 2)}%` }}/></div>)}{!book?.bids?.length && <p className="empty">No buy orders</p>}</div></section>; }
