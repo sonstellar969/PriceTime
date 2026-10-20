@@ -1,3 +1,6 @@
+import { CircularLinkedList, Stack } from "./dataStructures.js";
+import { binarySearch } from "./algorithms.js";
+
 export type Side = "BUY" | "SELL";
 export type OrderType = "LIMIT" | "MARKET";
 export type OrderStatus = "OPEN" | "PARTIALLY_FILLED" | "FILLED" | "CANCELLED" | "REJECTED";
@@ -6,6 +9,17 @@ export interface OrderInput { traderId: string; symbol: string; side: Side; type
 export interface Order extends OrderInput { id: number; createdAt: number; remaining: number; status: OrderStatus; prev?: Order; next?: Order; level?: PriceLevel }
 export interface Trade { id: number; symbol: string; pricePaise: number; quantity: number; buyOrderId: number; sellOrderId: number; buyerId: string; sellerId: string; createdAt: number; next?: Trade }
 export interface LevelView { pricePaise: number; quantity: number; orderCount: number }
+
+export interface OrderAction {
+  kind: "SUBMIT" | "CANCEL";
+  orderId: number;
+  symbol: string;
+  side?: Side;
+  type?: OrderType;
+  pricePaise?: number;
+  quantity?: number;
+  timestamp: number;
+}
 
 /** A price node in the order-book BST. Its orders form a FIFO doubly linked queue. */
 export class PriceLevel {
@@ -34,9 +48,14 @@ export class OrderBook {
   private nextOrderId = 1; private nextTradeId = 1;
   private orders: Order[] = []; // sorted by monotonically increasing ID: binary search supports cancellation.
   private tradeHead?: Trade; private tradeTail?: Trade;
-  private recentPrices = new Array<number>(20); private recentIndex = 0; private recentCount = 0;
+  private recentPrices = new CircularLinkedList<number>(20);
+  private actionStack = new Stack<OrderAction>();
   constructor(public readonly symbol: string) {}
   peekNextOrderId() { return this.nextOrderId; }
+  get recentPricesList(): CircularLinkedList<number> { return this.recentPrices; }
+  get auditStack(): Stack<OrderAction> { return this.actionStack; }
+  getActionHistory(): OrderAction[] { return this.actionStack.toArray(); }
+  peekLastAction(): OrderAction | undefined { return this.actionStack.peek(); }
   estimateMarketBuyCost(quantity: number) {
     let remaining = quantity, total = 0;
     for (const level of this.sellTree.levelsAscending(Number.MAX_SAFE_INTEGER)) {
@@ -65,14 +84,32 @@ export class OrderBook {
     if (order.remaining === 0) order.status = "FILLED";
     else if (order.type === "MARKET") order.status = trades.length ? "PARTIALLY_FILLED" : "REJECTED";
     else { order.status = trades.length ? "PARTIALLY_FILLED" : "OPEN"; (order.side === "BUY" ? this.buyTree : this.sellTree).insert(order.pricePaise!).enqueue(order); }
+    this.actionStack.push({ kind: "SUBMIT", orderId: order.id, symbol: this.symbol, side: order.side, type: order.type, pricePaise: order.pricePaise, quantity: order.quantity, timestamp: order.createdAt });
     return { order, trades, changedOrders: [...changedOrders] };
   }
-  cancel(id: number) { const order = this.findOrder(id); if (!order || !order.level) return false; const level = order.level; level.unlink(order); order.status = "CANCELLED"; if (!level.orderCount) (order.side === "BUY" ? this.buyTree : this.sellTree).delete(level); return true; }
-  private findOrder(id: number) { let low = 0, high = this.orders.length - 1; while (low <= high) { const middle = Math.floor((low + high) / 2); const candidate = this.orders[middle]; if (candidate.id === id) return candidate; if (candidate.id < id) low = middle + 1; else high = middle - 1; } return undefined; }
+  cancel(id: number) {
+    const order = this.findOrder(id);
+    if (!order || !order.level) return false;
+    const level = order.level;
+    level.unlink(order);
+    order.status = "CANCELLED";
+    if (!level.orderCount) (order.side === "BUY" ? this.buyTree : this.sellTree).delete(level);
+    this.actionStack.push({ kind: "CANCEL", orderId: id, symbol: this.symbol, timestamp: Date.now() });
+    return true;
+  }
+  findOrder(id: number): Order | undefined {
+    const found = binarySearch(this.orders, id, o => o.id);
+    return found?.item;
+  }
   private crosses(order: Order, restingPrice: number) { return order.side === "BUY" ? order.pricePaise! >= restingPrice : order.pricePaise! <= restingPrice; }
-  private appendTrade(trade: Trade) { if (this.tradeTail) this.tradeTail.next = trade; else this.tradeHead = trade; this.tradeTail = trade; this.recentPrices[this.recentIndex] = trade.pricePaise; this.recentIndex = (this.recentIndex + 1) % this.recentPrices.length; this.recentCount = Math.min(this.recentCount + 1, this.recentPrices.length); }
+  private appendTrade(trade: Trade) {
+    if (this.tradeTail) this.tradeTail.next = trade;
+    else this.tradeHead = trade;
+    this.tradeTail = trade;
+    this.recentPrices.append(trade.pricePaise);
+  }
   snapshot() { const bestBid = this.buyTree.maximum()?.pricePaise; const bestAsk = this.sellTree.minimum()?.pricePaise; return { symbol: this.symbol, bids: this.buyTree.levelsDescending().map(this.view), asks: this.sellTree.levelsAscending().map(this.view), bestBid, bestAsk, spreadPaise: bestBid && bestAsk ? bestAsk - bestBid : undefined, lastPricePaise: this.tradeTail?.pricePaise, movingAveragePaise: this.movingAverage(), recentTrades: this.trades().slice(-20).reverse() }; }
-  movingAverage() { if (!this.recentCount) return undefined; let total = 0; for (let i = 0; i < this.recentCount; i++) total += this.recentPrices[(this.recentIndex - 1 - i + this.recentPrices.length) % this.recentPrices.length]; return Math.round(total / this.recentCount); }
+  movingAverage() { return this.recentPrices.average(); }
   private view = (level: PriceLevel): LevelView => ({ pricePaise: level.pricePaise, quantity: level.quantity, orderCount: level.orderCount });
   trades() { const output: Trade[] = []; for (let trade = this.tradeHead; trade; trade = trade.next) output.push(trade); return output; }
 }

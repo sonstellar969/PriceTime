@@ -31,14 +31,15 @@ The chart widget uses exchange-qualified crypto symbols such as `BINANCE:DOGEUSD
 | Project requirement | Implemented structure | Role |
 |---|---|---|
 | Bid and ask price levels | Two ordinary BSTs per symbol | Find the best sell (minimum) and best buy (maximum); delete an empty level. |
-| FIFO orders per price | Doubly linked list at each level | Preserve time priority and unlink cancelled orders in O(1) after ID lookup. |
-| Locate order ID | Sorted append-only ID array with binary search | IDs increase in order, so an ordinary ID BST would skew. |
-| Trade tape | Singly linked list | Append executions in match order. |
-| Recent execution average | Circular buffer of 20 paise prices | Overwrite the oldest value and recompute a moving average. |
+| FIFO orders per price | Doubly linked queue at each level | Preserve time priority and unlink cancelled orders in O(1) after ID lookup. |
+| Locate order ID | Sorted append-only ID array with binary search | IDs increase monotonically; binary search provides O(log n) order lookup. |
+| Trade tape | Singly linked list | Append executions in match order via `Trade.next`. |
+| Recent execution average | Circular linked list (`tail.next === head`) | Overwrite oldest node in O(1) on capacity and compute the 20-trade moving average. |
+| Audit action history | Singly linked stack (`Stack<T>`) | Push order submit/cancel actions in LIFO order for engine audit tracking. |
 | Cost basis | FIFO lot records in Postgres, consumed FIFO | Calculate realized profit/loss as crypto units are sold. |
-| Trader search | Linear scan/filter of the trader’s trade report | A direct scan of the selected report history. |
-| Sort reports | Bubble, selection, insertion, merge, quick | Run on copied trade rows and show elapsed time. |
-| Replay comparison | Custom engine versus array scan | Compare identical CSV input and trade count. |
+| Trader search | Linear search (`linearSearch`) | Pure sequential search scanning trade history by trader ID and symbol. |
+| Sort reports | Bubble, selection, insertion, merge, quick | Five pure standalone sorting implementations with millisecond timing. |
+| Replay comparison | Custom engine versus array scan | Compare identical CSV input verifying matching trade counts, prices, and quantities. |
 
 The matching algorithm remains in `apps/api/src/engine/orderBook.ts`. Postgres stores durable state; the API reconstructs the in-memory BST and DLL from the append-only order event history before applying new writes. This keeps the DS implementation responsible for selecting fills and surviving Function restarts. Order updates, balance settlement, FIFO lots, and trade records are committed together.
 
@@ -142,12 +143,15 @@ SELL,MARKET,,2
 ## Main files
 
 ```text
-apps/api/src/engine/orderBook.ts       BST, DLL queues, SLL trade history, circular prices
-apps/api/src/engine/orderBook.test.ts  Deterministic match-priority test
+apps/api/src/engine/orderBook.ts       BST, DLL queues, SLL trade history, CLL moving average, Stack audit
+apps/api/src/engine/dataStructures.ts  CircularLinkedList (tail.next=head), Stack (LIFO), DoublyLinkedQueue
+apps/api/src/engine/algorithms.ts      linearSearch, binarySearch, Bubble, Selection, Insertion, Merge, Quick
+apps/api/src/engine/*.test.ts          26 tests covering engine, data structures, algorithms, and edge cases
 apps/api/src/function.ts               Authenticated Neon Function API and settlement
 apps/api/src/db/schema.ts              Typed Drizzle schema
 apps/api/drizzle/                      Versioned SQL migrations
 apps/web/src/main.tsx                  Full trading UI, auth, reports, replay
+apps/web/src/algorithms/               Pure search and sorting modules used in Reports
 apps/web/src/lib/auth.ts               Managed Neon Auth client
 apps/web/src/lib/api.ts                Authenticated API client
 apps/web/src/styles.css                Responsive product styling

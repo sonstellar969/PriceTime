@@ -6,7 +6,7 @@
     "build": "tsc -p tsconfig.json",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
     "db:migrate": "drizzle-kit migrate --config drizzle.config.ts",
-    "test": "tsx --test src/engine/orderBook.test.ts"
+    "test": "tsx --test src/engine/orderBook.test.ts src/engine/dataStructures.test.ts src/engine/algorithms.test.ts src/engine/edgeCases.test.ts"
   },
   "dependencies": {
     "@neon/functions": "^0.11.0",

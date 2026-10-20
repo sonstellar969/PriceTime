@@ -137,10 +137,24 @@ app.post("/api/replay", async c => {
   const csv = await c.req.text(); if (csv.length > 2_000_000) return c.json({ error: "CSV must be smaller than 2 MB." }, 413);
   const parsed = parseReplay(csv, symbolValue); if (!parsed.ok) return c.json({ error: parsed.error }, 400);
   const startedTree = performance.now(); const tree = new OrderBook(symbolValue); for (const order of parsed.orders) tree.submit(order); const treeMs = Math.max(0.01, performance.now() - startedTree);
+  const treeTrades = tree.trades();
   const startedArray = performance.now(); const arrayTrades = arrayReplay(parsed.orders); const arrayMs = Math.max(0.01, performance.now() - startedArray);
   const userId = c.get("principal").id;
-  await pool.query("insert into mf_replay_runs(user_id,order_count,bst_duration_ms,array_duration_ms,trade_count) values($1,$2,$3,$4,$5)", [userId, parsed.orders.length, Math.ceil(treeMs), Math.ceil(arrayMs), tree.trades().length]);
-  return c.json({ symbol: symbolValue, orders: parsed.orders.length, tradeCount: tree.trades().length, treeDll: { durationMs: Number(treeMs.toFixed(2)), ordersPerSecond: Math.round(parsed.orders.length / (treeMs / 1000)) }, plainArray: { durationMs: Number(arrayMs.toFixed(2)), ordersPerSecond: Math.round(parsed.orders.length / (arrayMs / 1000)) }, equivalentTrades: tree.trades().length === arrayTrades });
+  await pool.query("insert into mf_replay_runs(user_id,order_count,bst_duration_ms,array_duration_ms,trade_count) values($1,$2,$3,$4,$5)", [userId, parsed.orders.length, Math.ceil(treeMs), Math.ceil(arrayMs), treeTrades.length]);
+  const sequencesMatch = treeTrades.length === arrayTrades.length && treeTrades.every((t, i) => t.pricePaise === arrayTrades[i].pricePaise && t.quantity === arrayTrades[i].quantity);
+  return c.json({
+    symbol: symbolValue,
+    orders: parsed.orders.length,
+    tradeCount: treeTrades.length,
+    treeDll: { durationMs: Number(treeMs.toFixed(2)), ordersPerSecond: Math.round(parsed.orders.length / (treeMs / 1000)) },
+    plainArray: { durationMs: Number(arrayMs.toFixed(2)), ordersPerSecond: Math.round(parsed.orders.length / (arrayMs / 1000)) },
+    equivalentTrades: sequencesMatch,
+    equivalenceDetails: {
+      tradeCountMatch: treeTrades.length === arrayTrades.length,
+      sequenceMatch: sequencesMatch,
+      totalExecutedVolume: treeTrades.reduce((acc, t) => acc + t.quantity, 0)
+    }
+  });
 });
 
 app.onError((error, c) => { console.error("API error", error); return c.json({ error: "The API could not complete that request." }, 500); });
@@ -236,8 +250,14 @@ function parseReplay(csv: string, symbol: string): { ok: true; orders: OrderInpu
   }
   return { ok: true, orders };
 }
-function arrayReplay(inputs: OrderInput[]) {
-  const book: { side: Side; price: number; quantity: number; sequence: number }[] = []; let trades = 0;
+export interface ReplayTrade {
+  pricePaise: number;
+  quantity: number;
+}
+
+export function arrayReplay(inputs: OrderInput[]): ReplayTrade[] {
+  const book: { side: Side; price: number; quantity: number; sequence: number }[] = [];
+  const trades: ReplayTrade[] = [];
   for (let sequence = 0; sequence < inputs.length; sequence++) {
     const order = inputs[sequence]; let remaining = order.quantity;
     while (remaining > 0) {
@@ -247,7 +267,11 @@ function arrayReplay(inputs: OrderInput[]) {
         if (crosses && (best < 0 || (order.side === "BUY" ? item.price < book[best].price : item.price > book[best].price) || (item.price === book[best].price && item.sequence < book[best].sequence))) best = i;
       }
       if (best < 0) break;
-      const fill = Math.min(remaining, book[best].quantity); remaining -= fill; book[best].quantity -= fill; trades++;
+      const fill = Math.min(remaining, book[best].quantity);
+      const executionPrice = book[best].price;
+      remaining -= fill;
+      book[best].quantity -= fill;
+      trades.push({ pricePaise: executionPrice, quantity: fill });
       if (!book[best].quantity) book.splice(best, 1);
     }
     if (remaining > 0 && order.type === "LIMIT") book.push({ side: order.side, price: order.pricePaise!, quantity: remaining, sequence });
