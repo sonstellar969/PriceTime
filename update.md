@@ -76,6 +76,10 @@ PriceTime tracks and renders Realized and Unrealized P/L in real time:
 - [x] TradingView live crypto chart widgets for all 5 coins (DOGE, XRP, ADA, TRX, AVAX).
 - [x] Neon Managed Auth integration and Postgres transactional persistence.
 - [x] Account identity reconciliation and foreign key `ON UPDATE CASCADE` migration ensuring seamless session logins without `mf_users_email_idx` unique violations.
+- [x] Event-sourced order ID alignment: `OrderBook.submit()` preserves order IDs stored in events during replay, preventing monotonic ID desync and guaranteeing O(log n) binary search cancellation accuracy.
+- [x] Hardened order cancellation (`DELETE /api/orders/:symbol/:id`): unlinks orders from DLL levels, refunds reserved demo cash or shares directly to reserving user account, marks status `CANCELLED`, and appends cancel action to engine audit stack.
+- [x] Defensive `/api/account` query: joins user IDs by current auth token subject and verified email, providing defensive defaults for wallet balances and realized P&L to eliminate 500 errors.
+- [x] UI stability: background polling refresh warnings are logged to console without clobbering active user action banners, and open order filters cleanly expose all cancellable orders with positive remaining quantities.
 - [x] JSONB event log migration updating event payload trader IDs on user reconciliation.
 - [x] 26 unit and integration tests passing (`npm test`).
 - [x] 9-stage end-to-end automated API feature test suite passing (`npm run test:e2e`).

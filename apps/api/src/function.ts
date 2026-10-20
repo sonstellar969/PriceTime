@@ -49,27 +49,90 @@ app.get("/api/account", async c => {
   await bootstrap();
   const client = await pool.connect();
   try {
-    const user = c.get("principal"); await ensureAccount(client, user);
-    const wallet = (await client.query("select available_cash_paise, reserved_cash_paise from mf_wallets where user_id=$1", [user.id])).rows[0];
-    const positions = (await client.query("select p.symbol,p.available_shares,p.reserved_shares,coalesce(sum(l.quantity),0)::int as owned_shares,coalesce(sum(l.quantity*l.unit_cost_paise),0)::bigint as cost_basis_paise from mf_positions p left join mf_portfolio_lots l on l.user_id=p.user_id and l.symbol=p.symbol where p.user_id=$1 group by p.symbol,p.available_shares,p.reserved_shares order by p.symbol", [user.id])).rows;
-    const orders = (await client.query("select symbol,order_id,side,type,limit_price_paise,original_quantity,remaining_quantity,status,created_at from mf_orders where user_id=$1 order by created_at desc limit 100", [user.id])).rows;
-    const realized = (await client.query("select coalesce(sum(realized_paise),0)::bigint as realized_paise from mf_realized_pnl where user_id=$1", [user.id])).rows[0];
-    const trades = (await client.query("select symbol,trade_id,price_paise,quantity,buyer_id,seller_id,created_at from mf_trades where buyer_id=$1 or seller_id=$1 order by created_at desc limit 100", [user.id])).rows;
+    const user = c.get("principal");
+    await ensureAccount(client, user);
+    const walletRes = await client.query(
+      `select available_cash_paise, reserved_cash_paise 
+       from mf_wallets 
+       where user_id=$1 or user_id in (select id from mf_users where email=$2)
+       limit 1`,
+      [user.id, user.email || ""]
+    );
+    const wallet = walletRes.rows[0] ?? { available_cash_paise: 10_000_000, reserved_cash_paise: 0 };
+    const positions = (await client.query(
+      `select p.symbol, p.available_shares, p.reserved_shares,
+              coalesce(sum(l.quantity),0)::int as owned_shares,
+              coalesce(sum(l.quantity*l.unit_cost_paise),0)::bigint as cost_basis_paise 
+       from mf_positions p 
+       left join mf_portfolio_lots l on l.user_id=p.user_id and l.symbol=p.symbol 
+       where p.user_id=$1 or p.user_id in (select id from mf_users where email=$2)
+       group by p.symbol, p.available_shares, p.reserved_shares 
+       order by p.symbol`,
+      [user.id, user.email || ""]
+    )).rows;
+    const orders = (await client.query(
+      `select symbol, order_id, side, type, limit_price_paise, original_quantity, remaining_quantity, status, created_at 
+       from mf_orders 
+       where user_id=$1 or user_id in (select id from mf_users where email=$2)
+       order by created_at desc limit 100`,
+      [user.id, user.email || ""]
+    )).rows;
+    const realized = (await client.query(
+      `select coalesce(sum(realized_paise),0)::bigint as realized_paise 
+       from mf_realized_pnl 
+       where user_id=$1 or user_id in (select id from mf_users where email=$2)`,
+      [user.id, user.email || ""]
+    )).rows[0] ?? { realized_paise: 0 };
+    const trades = (await client.query(
+      `select symbol, trade_id, price_paise, quantity, buyer_id, seller_id, created_at 
+       from mf_trades 
+       where buyer_id=$1 or seller_id=$1 
+          or buyer_id in (select id from mf_users where email=$2) 
+          or seller_id in (select id from mf_users where email=$2)
+       order by created_at desc limit 100`,
+      [user.id, user.email || ""]
+    )).rows;
     const last = await client.query("select distinct on (symbol) symbol,price_paise from mf_trades order by symbol,created_at desc,trade_id desc");
     const latest = new Map(last.rows.map(row => [row.symbol, Number(row.price_paise)]));
-    const portfolio = positions.map(row => { const market = latest.get(row.symbol) ?? anchors[row.symbol as keyof typeof anchors]; const units = Number(row.owned_shares); const basis = Number(row.cost_basis_paise); return { symbol: row.symbol, availableUnits: row.available_shares, reservedUnits: row.reserved_shares, units, averageCostPaise: units ? Math.round(basis / units) : 0, lastPricePaise: market, unrealizedPaise: market * units - basis }; });
-    return c.json({ user: { id: user.id, email: user.email, name: user.name }, wallet: { availableCashPaise: Number(wallet.available_cash_paise), reservedCashPaise: Number(wallet.reserved_cash_paise) }, positions: portfolio, realizedPaise: Number(realized.realized_paise), orders, trades });
+    const positionBySymbol = new Map(positions.map(p => [p.symbol, p]));
+    const portfolio = symbols.map(sym => {
+      const row = positionBySymbol.get(sym);
+      const market = latest.get(sym) ?? anchors[sym];
+      const units = Number(row?.owned_shares ?? 0);
+      const basis = Number(row?.cost_basis_paise ?? 0);
+      return {
+        symbol: sym,
+        availableUnits: row?.available_shares ?? 0,
+        reservedUnits: row?.reserved_shares ?? 0,
+        units,
+        averageCostPaise: units ? Math.round(basis / units) : 0,
+        lastPricePaise: market,
+        unrealizedPaise: market * units - basis
+      };
+    });
+    return c.json({
+      user: { id: user.id, email: user.email, name: user.name },
+      wallet: { availableCashPaise: Number(wallet.available_cash_paise), reservedCashPaise: Number(wallet.reserved_cash_paise) },
+      positions: portfolio,
+      realizedPaise: Number(realized.realized_paise),
+      orders,
+      trades
+    });
   } finally { client.release(); }
 });
 app.get("/api/books", async c => { await bootstrap(); const snapshots = await Promise.all(symbols.map(symbol => readBook(symbol))); return c.json(snapshots); });
 app.get("/api/books/:symbol", async c => { const symbol = c.req.param("symbol"); if (!isSymbol(symbol)) return c.json({ error: "Unknown symbol." }, 404); await bootstrap(); return c.json(await readBook(symbol)); });
 app.get("/api/trades", async c => {
   const user = c.get("principal"); const symbol = c.req.query("symbol");
-  const values: unknown[] = [user.id]; const symbolClause = symbol && isSymbol(symbol) ? " and symbol=$2" : ""; if (symbolClause) values.push(symbol);
-  const result = await pool.query(`select symbol,trade_id,price_paise,quantity,buyer_id,seller_id,created_at from mf_trades where (buyer_id=$1 or seller_id=$1)${symbolClause} order by created_at desc limit 1000`, values);
+  const values: unknown[] = [user.id, user.email || ""]; const symbolClause = symbol && isSymbol(symbol) ? " and symbol=$3" : ""; if (symbolClause) values.push(symbol);
+  const result = await pool.query(`select symbol,trade_id,price_paise,quantity,buyer_id,seller_id,created_at from mf_trades where (buyer_id=$1 or seller_id=$1 or buyer_id in (select id from mf_users where email=$2) or seller_id in (select id from mf_users where email=$2))${symbolClause} order by created_at desc limit 1000`, values);
   return c.json(result.rows);
 });
-app.get("/api/orders", async c => { const result = await pool.query("select symbol,order_id,side,type,limit_price_paise,original_quantity,remaining_quantity,status,created_at from mf_orders where user_id=$1 order by created_at desc limit 200", [c.get("principal").id]); return c.json(result.rows); });
+app.get("/api/orders", async c => {
+  const user = c.get("principal");
+  const result = await pool.query("select symbol,order_id,side,type,limit_price_paise,original_quantity,remaining_quantity,status,created_at from mf_orders where user_id=$1 or user_id in (select id from mf_users where email=$2) order by created_at desc limit 200", [user.id, user.email || ""]);
+  return c.json(result.rows);
+});
 
 app.post("/api/orders", async c => {
   const parsed = orderRequest.safeParse(await c.req.json().catch(() => null));
@@ -115,21 +178,50 @@ app.post("/api/orders", async c => {
 });
 
 app.delete("/api/orders/:symbol/:id", async c => {
-  const symbol = c.req.param("symbol"), orderId = Number(c.req.param("id")); if (!isSymbol(symbol) || !Number.isInteger(orderId)) return c.json({ error: "Invalid order." }, 400);
-  await bootstrap(); const client = await pool.connect();
+  const symbol = c.req.param("symbol"), orderId = Number(c.req.param("id"));
+  if (!isSymbol(symbol) || !Number.isInteger(orderId)) return c.json({ error: "Invalid order." }, 400);
+  await bootstrap();
+  const client = await pool.connect();
   try {
-    await client.query("begin"); await client.query("select pg_advisory_xact_lock($1)", [lockKey]);
-    const user = c.get("principal"); const row = (await client.query("select * from mf_orders where symbol=$1 and order_id=$2 and user_id=$3 for update", [symbol, orderId, user.id])).rows[0];
-    if (!row || !["OPEN", "PARTIALLY_FILLED"].includes(row.status) || row.type !== "LIMIT") { await client.query("rollback"); return c.json({ error: "Open limit order not found." }, 404); }
-    const book = await loadBook(client, symbol); if (!book.cancel(orderId)) { await client.query("rollback"); return c.json({ error: "Order is no longer open." }, 409); }
+    await client.query("begin");
+    await client.query("select pg_advisory_xact_lock($1)", [lockKey]);
+    const user = c.get("principal");
+    await ensureAccount(client, user);
+
+    const row = (await client.query(
+      `select * from mf_orders 
+       where symbol=$1 and order_id=$2 
+       and (user_id=$3 or user_id in (select id from mf_users where email=$4))
+       for update`,
+      [symbol, orderId, user.id, user.email || ""]
+    )).rows[0];
+
+    if (!row) {
+      await client.query("rollback");
+      return c.json({ error: "Open order not found." }, 404);
+    }
+    if (!["OPEN", "PARTIALLY_FILLED"].includes(row.status)) {
+      await client.query("rollback");
+      return c.json({ error: `Order is already ${row.status.toLowerCase()}.` }, 400);
+    }
+
+    const book = await loadBook(client, symbol);
+    book.cancel(orderId);
+
     const cash = Number(row.reserved_cash_paise), shares = Number(row.reserved_shares);
-    if (cash) await client.query("update mf_wallets set available_cash_paise=available_cash_paise+$2,reserved_cash_paise=reserved_cash_paise-$2,updated_at=now() where user_id=$1", [user.id, cash]);
-    if (shares) await client.query("update mf_positions set available_shares=available_shares+$3,reserved_shares=reserved_shares-$3 where user_id=$1 and symbol=$2", [user.id, symbol, shares]);
+    if (cash) await client.query("update mf_wallets set available_cash_paise=available_cash_paise+$2,reserved_cash_paise=reserved_cash_paise-$2,updated_at=now() where user_id=$1", [row.user_id, cash]);
+    if (shares) await client.query("update mf_positions set available_shares=available_shares+$3,reserved_shares=reserved_shares-$3 where user_id=$1 and symbol=$2", [row.user_id, symbol, shares]);
     await client.query("update mf_orders set status='CANCELLED',reserved_cash_paise=0,reserved_shares=0,cancelled_at=now() where symbol=$1 and order_id=$2", [symbol, orderId]);
     await client.query("insert into mf_order_events(symbol,kind,order_id,payload) values($1,'cancel',$2,'{}'::jsonb)", [symbol, orderId]);
-    await client.query("commit"); return c.json({ cancelled: true, snapshot: await readBook(symbol) });
-  } catch (error) { await client.query("rollback").catch(() => undefined); console.error("cancel failed", error); return c.json({ error: "Order cancellation failed." }, 500); }
-  finally { client.release(); }
+    await client.query("commit");
+    return c.json({ cancelled: true, snapshot: await readBook(symbol) });
+  } catch (error: any) {
+    await client.query("rollback").catch(() => undefined);
+    console.error("cancel failed", error);
+    return c.json({ error: error?.message ?? "Order cancellation failed." }, 500);
+  } finally {
+    client.release();
+  }
 });
 
 app.post("/api/replay", async c => {
@@ -157,7 +249,10 @@ app.post("/api/replay", async c => {
   });
 });
 
-app.onError((error, c) => { console.error("API error", error); return c.json({ error: "The API could not complete that request." }, 500); });
+app.onError((error, c) => {
+  console.error("API error", error);
+  return c.json({ error: error?.message || "The API could not complete that request." }, 500);
+});
 
 let bootPromise: Promise<void> | undefined;
 async function bootstrap() { bootPromise ??= initializeDemoBooks().catch(error => { bootPromise = undefined; throw error; }); return bootPromise; }
@@ -188,15 +283,22 @@ async function ensureAccount(client: PoolClient, user: Principal, maker = false)
   const name = user.name || "Paper trader";
   const existingById = await client.query("select id from mf_users where id=$1", [user.id]);
   if (existingById.rowCount) {
-    await client.query("update mf_users set email=$2, display_name=$3 where id=$1", [user.id, email, name]);
+    if (user.email) {
+      const emailTaken = await client.query("select id from mf_users where email=$1 and id != $2", [user.email, user.id]);
+      if (!emailTaken.rowCount) {
+        await client.query("update mf_users set email=$2, display_name=$3 where id=$1", [user.id, user.email, name]);
+      } else {
+        await client.query("update mf_users set display_name=$2 where id=$1", [user.id, name]);
+      }
+    }
   } else {
-    const existingByEmail = await client.query("select id from mf_users where email=$1", [email]);
+    const existingByEmail = user.email ? await client.query("select id from mf_users where email=$1", [user.email]) : { rowCount: 0, rows: [] };
     if (existingByEmail.rowCount) {
       const oldId = existingByEmail.rows[0].id;
-      await client.query("update mf_users set id=$1, display_name=$2 where email=$3", [user.id, name, email]);
+      await client.query("update mf_users set id=$1, display_name=$2 where id=$3", [user.id, name, oldId]);
       await client.query("update mf_order_events set payload = jsonb_set(payload, '{traderId}', to_jsonb($1::text)) where payload->>'traderId' = $2", [user.id, oldId]);
     } else {
-      await client.query("insert into mf_users(id,email,display_name) values($1,$2,$3)", [user.id, email, name]);
+      await client.query("insert into mf_users(id,email,display_name) values($1,$2,$3) on conflict(id) do update set display_name=excluded.display_name", [user.id, email, name]);
     }
   }
   await client.query("insert into mf_wallets(user_id,available_cash_paise,reserved_cash_paise) values($1,$2,0) on conflict(user_id) do nothing", [user.id, maker ? 1_000_000_000_000 : 10_000_000]);

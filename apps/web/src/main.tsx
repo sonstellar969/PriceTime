@@ -37,10 +37,10 @@ function App() {
 
       const rejected = [bookRes, accountRes, ordersRes, tradesRes].find(r => r.status === "rejected") as PromiseRejectedResult | undefined;
       if (rejected && rejected.reason instanceof Error) {
-        setNotice(rejected.reason.message);
+        console.error("Refresh sync warning:", rejected.reason.message);
       }
     } catch (error) {
-      if (error instanceof Error) setNotice(error.message);
+      console.error("Refresh error:", error);
     }
   };
   useEffect(() => { if (session?.user) void refresh(); else { setAccount(undefined); setBook(undefined); } }, [session?.user?.id, symbol]);
@@ -100,7 +100,7 @@ function App() {
           <div className="dashboard-grid"><section className="panel chart-panel"><div className="panel-heading"><div><h2>{current.name} <span className="symbol-tag">{symbol}</span></h2><p>Binance crypto chart</p></div><span className="live-tag"><i/> LIVE CHART</span></div><TradingViewChart symbol={symbol}/><div className="market-note">TradingView charts the Binance crypto pair in USDT. PriceTime order books use separate demo reference prices in INR; fills never route to an exchange.</div></section>
             <section className="panel ticket"><div className="panel-heading"><h2>Place order</h2><span>{money(account?.wallet.availableCashPaise)} available</span></div><form onSubmit={submitOrder}><div className="side-toggle"><button type="button" className={side === "BUY" ? "active buy" : ""} onClick={() => setSide("BUY")}>Buy</button><button type="button" className={side === "SELL" ? "active sell" : ""} onClick={() => setSide("SELL")}>Sell</button></div><label htmlFor="order-type">Order type</label><select id="order-type" value={type} onChange={event => setType(event.target.value as "LIMIT" | "MARKET")}><option value="LIMIT">Limit</option><option value="MARKET">Market</option></select><label htmlFor="order-quantity">Quantity <small>Available: {account?.positions.find(position => position.symbol === symbol)?.availableUnits ?? 0} units</small></label><input id="order-quantity" min="1" step="1" type="number" value={quantity} onChange={event => setQuantity(Number(event.target.value))}/>{type === "LIMIT" && <><label htmlFor="limit-price">Limit price <small>₹ INR</small></label><input id="limit-price" inputMode="decimal" min="0.01" step="0.01" type="number" value={price} onChange={event => setPrice(event.target.value)}/></>}<button className={`submit-order ${side.toLowerCase()}`} disabled={busy}>{busy ? "Working…" : `Place ${side.toLowerCase()} order`}</button><p className="demo-disclaimer">Simulated fills only. This does not route to a real exchange.</p></form></section>
             <OrderBook book={book}/><section className="panel trade-tape"><div className="panel-heading"><h2>Recent executions</h2><span>20-trade average: {money(book?.movingAveragePaise)}</span></div><TradeTable trades={book?.recentTrades?.map(trade => ({ symbol, trade_id: trade.id, price_paise: trade.pricePaise, quantity: trade.quantity, buyer_id: trade.buyerId, seller_id: trade.sellerId, created_at: new Date(trade.createdAt).toISOString() })) ?? []}/></section>
-            <section className="panel orders-panel"><div className="panel-heading"><h2>My open orders</h2><span>Limit orders can be cancelled</span></div><OrderList orders={orders.filter(order => order.symbol === symbol && order.type === "LIMIT" && ["OPEN", "PARTIALLY_FILLED"].includes(order.status) && Number(order.remaining_quantity) > 0)} onCancel={doCancel} busy={busy}/></section>
+            <section className="panel orders-panel"><div className="panel-heading"><h2>My open orders</h2><span>Open orders can be cancelled</span></div><OrderList orders={orders.filter(order => order.symbol === symbol && ["OPEN", "PARTIALLY_FILLED"].includes(order.status) && Number(order.remaining_quantity) > 0)} onCancel={doCancel} busy={busy}/></section>
           </div>
         </>;
       })()}

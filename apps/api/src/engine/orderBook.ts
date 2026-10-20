@@ -66,7 +66,9 @@ export class OrderBook {
   allOrders() { return this.orders; }
   submit(input: OrderInput) {
     if (input.symbol !== this.symbol || input.quantity <= 0 || (input.type === "LIMIT" && !input.pricePaise)) throw new Error("Invalid order");
-    const order: Order = { ...input, id: this.nextOrderId++, createdAt: Date.now(), remaining: input.quantity, status: "OPEN" };
+    const id = typeof (input as any).orderId === "number" ? (input as any).orderId : this.nextOrderId++;
+    this.nextOrderId = Math.max(this.nextOrderId, id + 1);
+    const order: Order = { ...input, id, createdAt: Date.now(), remaining: input.quantity, status: "OPEN" };
     this.orders.push(order); const trades: Trade[] = [];
     const changedOrders = new Set<Order>([order]);
     while (order.remaining > 0) {
@@ -89,17 +91,20 @@ export class OrderBook {
   }
   cancel(id: number) {
     const order = this.findOrder(id);
-    if (!order || !order.level) return false;
-    const level = order.level;
-    level.unlink(order);
+    if (!order || order.status === "CANCELLED" || order.status === "FILLED") return false;
+    if (order.level) {
+      const level = order.level;
+      level.unlink(order);
+      if (!level.orderCount) (order.side === "BUY" ? this.buyTree : this.sellTree).delete(level);
+    }
     order.status = "CANCELLED";
-    if (!level.orderCount) (order.side === "BUY" ? this.buyTree : this.sellTree).delete(level);
+    order.remaining = 0;
     this.actionStack.push({ kind: "CANCEL", orderId: id, symbol: this.symbol, timestamp: Date.now() });
     return true;
   }
   findOrder(id: number): Order | undefined {
     const found = binarySearch(this.orders, id, o => o.id);
-    return found?.item;
+    return found?.item ?? this.orders.find(o => o.id === id);
   }
   private crosses(order: Order, restingPrice: number) { return order.side === "BUY" ? order.pricePaise! >= restingPrice : order.pricePaise! <= restingPrice; }
   private appendTrade(trade: Trade) {
