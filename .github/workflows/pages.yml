@@ -1,4 +1,4 @@
-name: Deploy MarketForge to GitHub Pages
+name: Deploy PriceTime to GitHub Pages
 
 on:
   push:

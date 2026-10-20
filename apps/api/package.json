@@ -1,5 +1,5 @@
 {
-  "name": "@marketforge/api",
+  "name": "@pricetime/api",
   "private": true,
   "type": "module",
   "scripts": {

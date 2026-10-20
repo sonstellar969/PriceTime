@@ -6,7 +6,7 @@
 
 ---
 
-**Project:** MarketForge
+**Project:** PriceTime
 **Generated:** 2026-10-20 08:21:13
 **Category:** Fintech/Crypto
 

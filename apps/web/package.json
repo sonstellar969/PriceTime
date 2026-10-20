@@ -1,5 +1,5 @@
 {
-  "name": "@marketforge/web",
+  "name": "@pricetime/web",
   "private": true,
   "type": "module",
   "scripts": {

@@ -1,6 +1,6 @@
 # Trading Dashboard Page Overrides
 
-> **PROJECT:** MarketForge
+> **PROJECT:** PriceTime
 > **Generated:** 2026-10-20 08:21:13
 > **Page Type:** Dashboard / Data View
 

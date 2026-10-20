@@ -4,7 +4,7 @@ export default defineConfig({
   auth: true,
   functions: {
     api: {
-      name: "MarketForge API",
+      name: "PriceTime API",
       source: "apps/api/src/function.ts",
       env: { ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS! },
     },
