@@ -55,6 +55,24 @@ The matching algorithm remains in `apps/api/src/engine/orderBook.ts`. Postgres s
 
 Money uses integer paise in the engine and database: ₹101.00 is `10100`. No floating-point prices are used for order matching or settlement.
 
+## How P&L (Profit & Loss) and FIFO Lots Work
+
+PriceTime tracks two kinds of profit and loss in real time with integer-paise precision:
+
+1. **Realized FIFO P&L**:
+   - When a trader sells crypto units, the backend consumes the trader's oldest unconsumed purchase lots (`mf_portfolio_lots` ordered by `opened_at, id`).
+   - Units are deducted from the earliest lot (First-In, First-Out accounting).
+   - $\text{Cost Basis} = \sum (\text{units consumed} \times \text{unit cost paise})$.
+   - $\text{Proceeds} = \text{units sold} \times \text{execution price paise}$.
+   - $\text{Realized P/L} = \text{proceeds} - \text{cost basis}$.
+   - Persisted in `mf_realized_pnl` and immediately reflected in account summaries.
+2. **Unrealized P&L**:
+   - Calculated per position: $(\text{last trade price paise} \times \text{units held}) - \text{remaining cost basis paise}$.
+   - Updates as simulated market prices shift and new trades execute.
+3. **Live Visibility**:
+   - **Trade Desk**: Displays the trader's all-time **Realized FIFO P/L**, the active crypto's **Unrealized P/L**, and current holding quantity directly in the top metric strip. When an order is placed and filled, account balances and P/L are immediately re-fetched and updated.
+   - **Portfolio Desk**: Displays summary cards for **Available demo cash**, **Realized FIFO P/L**, **Unrealized P/L (Total)**, and **Net Total P/L** (Realized + Unrealized), plus a per-crypto table with owned units, average unit cost, last price, and position P/L.
+
 ## Market charts and data
 
 The charts use TradingView’s embeddable Advanced Chart widget, which supplies its own public chart data feed. This is not a general-purpose market-data API. Data availability, real-time versus delayed status, and exchange coverage depend on TradingView and exchange entitlements. The order book, fills, spread, wallet, and P/L remain PriceTime simulation data.

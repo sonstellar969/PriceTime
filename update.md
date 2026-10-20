@@ -39,6 +39,51 @@ This file tracks the data structures and algorithms implementation and verificat
 - TradingView Advanced Chart embed configured for Binance crypto pairs `BINANCE:<SYMBOL>USDT`. The chart is public market display; the PriceTime INR book and fills are simulation data, not pegged to live crypto prices.
 - GitHub Pages hosting and Neon production API/Postgres/Auth configuration.
 
+## Profit & Loss (P&L) Implementation & Verification
+
+PriceTime tracks and renders Realized and Unrealized P/L in real time:
+
+1. **FIFO Lot Settlement (`settleTrade` in `apps/api/src/function.ts`)**:
+   - Each buy execution creates a lot in `mf_portfolio_lots` (`user_id`, `symbol`, `quantity`, `unit_cost_paise`, `opened_at`).
+   - Each sell execution consumes lots strictly First-In, First-Out (oldest `opened_at` first).
+   - $\text{Cost Basis} = \sum (\text{consumed units} \times \text{lot unit cost paise})$.
+   - $\text{Proceeds} = \text{sold units} \times \text{fill price paise}$.
+   - $\text{Realized P/L} = \text{proceeds} - \text{cost basis}$, recorded in `mf_realized_pnl`.
+   - Verified by unit test `FIFO lots accounting logic: consumption and realized P/L calculation` in `edgeCases.test.ts`.
+2. **Unrealized P&L Calculation (`GET /api/account`)**:
+   - For every symbol holding: $(\text{last trade price paise} \times \text{owned units}) - \text{total cost basis paise}$.
+   - Updates as market prices shift and new trades execute.
+3. **UI Integration (`apps/web/src/main.tsx`)**:
+   - **Trade Desk**: Top metric bar displays **Realized FIFO P/L**, **Unrealized P/L** for the active coin, and current coin holding quantity with green/red indicator tones. Placing an order immediately re-fetches account balances and updates P&L.
+   - **Portfolio Desk**: Shows four summary metrics: **Available demo cash**, **Realized FIFO P/L**, **Unrealized P/L (Total)** across all coins, and **Net Total P/L** (Realized + Unrealized), plus a per-crypto table with holding details.
+
+## What has been implemented vs what is pending
+
+### Completed & Implemented
+- [x] All 13 required course topics implemented and covered by automated tests:
+  - Linear Search (`linearSearch`, `linearSearchFirst` in `algorithms.ts`, used in Reports UI)
+  - Binary Search (`binarySearch` in `algorithms.ts`, used in `OrderBook.findOrder()`)
+  - Singly Linked List (`Trade.next` execution tape, `StackNode<T>`)
+  - Circular Linked List (`CircularLinkedList<T>` with `tail.next === head` invariant powering moving averages)
+  - Doubly Linked List (Price level order queue with O(1) unlinking, generic `DoublyLinkedQueue<T>`)
+  - Queue using Linked Lists (`PriceLevel` FIFO time priority, `DoublyLinkedQueue<T>`)
+  - Stack using Linked Lists (`Stack<T>` LIFO audit action stack in `OrderBook`)
+  - Binary Search Tree (`PriceTree` bid/ask price levels with insert, find, delete, min, max)
+  - 5 Sorting Algorithms (Bubble, Selection, Insertion, Merge, Quick Sort in `sorts.ts` with ms timing)
+- [x] Real-time P&L tracking (Realized FIFO P/L, Unrealized P/L, Net P/L) on Trade desk and Portfolio.
+- [x] Full matching engine edge cases: market buy/sell with zero liquidity, partial liquidity, multi-price level sweeps, head/middle/tail cancellation.
+- [x] Replay benchmark verifying exact trade sequence, price, and quantity equivalence against the plain-array baseline.
+- [x] TradingView live crypto chart widgets for all 5 coins (DOGE, XRP, ADA, TRX, AVAX).
+- [x] Neon Managed Auth integration and Postgres transactional persistence.
+- [x] 26 unit and integration tests passing (`npm test`).
+- [x] Production build passing (`npm run build`).
+
+### Pending / Sensible future enhancements (Out of scope for coursework rubric)
+- [ ] Historical P/L equity curve chart over time (currently shows live cumulative Realized & Unrealized P/L numbers).
+- [ ] Snapshotting/checkpointing the event stream for very high volume production (classroom scale replays full event log safely).
+- [ ] Email verification & password reset SMTP configuration for open public registration (class demo uses instant email/password auth).
+- [ ] Additional crypto symbols beyond DOGE, XRP, ADA, TRX, and AVAX.
+
 ## Verified state
 
 - `npm test`: 26 comprehensive unit and integration tests pass across:
@@ -48,6 +93,7 @@ This file tracks the data structures and algorithms implementation and verificat
   - `src/engine/edgeCases.test.ts` (CLL pointer verification, linked Stack audit history, binarySearch O(log n) order lookup, market orders with zero/partial liquidity, multi-price level sweep, cancellation edge cases, OrderBook vs arrayReplay benchmark sequence equivalence, FIFO lots realized P/L)
 - `npm run build`: API TypeScript build (`tsc -p tsconfig.json`) and frontend production build (`tsc -b && vite build`) both succeed with zero errors.
 - Replay benchmark now compares full trade sequence, price, and quantity equivalence rather than just total trade count.
+- GitHub repository description updated via `gh repo edit`.
 
 ## Guardrails
 

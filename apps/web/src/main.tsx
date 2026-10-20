@@ -26,7 +26,32 @@ function App() {
   useEffect(() => { if (session?.user) void refresh(); else { setAccount(undefined); setBook(undefined); } }, [session?.user?.id, symbol]);
   useEffect(() => { if (!session?.user) return; const timer = window.setInterval(() => { void getBook(symbol).then(setBook).catch(() => undefined); void getAccount().then(setAccount).catch(() => undefined); }, 3000); return () => window.clearInterval(timer); }, [session?.user?.id, symbol]);
   useEffect(() => { setPrice((current.anchor / 100).toFixed(2)); }, [symbol]);
-  async function submitOrder(event: FormEvent) { event.preventDefault(); setBusy(true); setNotice(""); try { const result = await sendOrder({ symbol, side, type, quantity, pricePaise: type === "LIMIT" ? Math.round(Number(price) * 100) : undefined }); setBook(result.snapshot); setNotice(`Order ${symbol} #${result.order.id}: ${result.order.status.toLowerCase().replace(/_/g, " ")}. ${result.trades.length} execution(s).`); await refresh(); } catch (error) { setNotice(error instanceof Error ? error.message : "Order failed."); } finally { setBusy(false); } }
+  async function submitOrder(event: FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setNotice("");
+    try {
+      const result = await sendOrder({
+        symbol,
+        side,
+        type,
+        quantity,
+        pricePaise: type === "LIMIT" ? Math.round(Number(price) * 100) : undefined
+      });
+      setBook(result.snapshot);
+      const fills = result.trades.length;
+      let msg = `Order ${symbol} #${result.order.id}: ${result.order.status.toLowerCase().replace(/_/g, " ")}.`;
+      if (fills > 0) {
+        msg += ` ${fills} execution(s) matched. Balances and P/L updated.`;
+      }
+      setNotice(msg);
+      await refresh();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Order failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
   async function doCancel(order: OrderRow) { setBusy(true); try { await cancelOrder(order.symbol, order.order_id); setNotice(`${order.symbol} order #${order.order_id} cancelled.`); await refresh(); } catch (error) { setNotice(error instanceof Error ? error.message : "Cancel failed."); } finally { setBusy(false); } }
   async function signOut() { await authClient.signOut(); setNotice("Signed out."); }
   if (checkingSession) return <div className="loading-screen">Connecting to PriceTime…</div>;
@@ -35,14 +60,29 @@ function App() {
     <aside className="sidebar"><a className="brand" href="#trade" onClick={() => setPage("Trade")}><CandlestickChart/><span>price<span>time</span></span></a><nav aria-label="Main navigation">{(["Trade", "Portfolio", "Reports", "Replay"] as Page[]).map((item, index) => { const Icon = [LayoutDashboard, Wallet, BarChart3, Play][index]; return <button key={item} className={page === item ? "nav-item active" : "nav-item"} onClick={() => setPage(item)}><Icon/>{item}</button>; })}</nav><div className="paper-note"><CircleDollarSign/><p>Paper account<br/><small>Demo cash · no real funds</small></p></div><button className="logout" onClick={signOut}><LogOut/> Sign out</button></aside>
     <section className="workspace"><header className="topbar"><div><p className="eyebrow">CRYPTO PAPER EXCHANGE</p><h1>{page === "Trade" ? "Trade desk" : page}</h1></div><div className="account-pill"><span className="status-dot"/>{session.user.name || session.user.email}<button type="button" onClick={signOut}>Sign out</button></div></header>
       <div className="ticker-strip">{symbols.map(item => <button key={item.symbol} className={symbol === item.symbol ? "ticker selected" : "ticker"} onClick={() => setSymbol(item.symbol)}><span>{item.symbol}</span><small>{item.market} · {item.name}</small></button>)}</div>
-      {page === "Trade" && <>
-        <div className="metrics"><Metric label="Last simulated trade" value={money(book?.lastPricePaise ?? current.anchor)}/><Metric label="Best bid" value={money(book?.bestBid)} tone="green"/><Metric label="Best ask" value={money(book?.bestAsk)} tone="red"/><Metric label="Spread" value={money(book?.spreadPaise)}/><Metric label="Demo cash available" value={money(account?.wallet.availableCashPaise)}/></div>
-        <div className="dashboard-grid"><section className="panel chart-panel"><div className="panel-heading"><div><h2>{current.name} <span className="symbol-tag">{symbol}</span></h2><p>Binance crypto chart</p></div><span className="live-tag"><i/> LIVE CHART</span></div><TradingViewChart symbol={symbol}/><div className="market-note">TradingView charts the Binance crypto pair in USDT. PriceTime order books use separate demo reference prices in INR; fills never route to an exchange.</div></section>
-          <section className="panel ticket"><div className="panel-heading"><h2>Place order</h2><span>{money(account?.wallet.availableCashPaise)} available</span></div><form onSubmit={submitOrder}><div className="side-toggle"><button type="button" className={side === "BUY" ? "active buy" : ""} onClick={() => setSide("BUY")}>Buy</button><button type="button" className={side === "SELL" ? "active sell" : ""} onClick={() => setSide("SELL")}>Sell</button></div><label htmlFor="order-type">Order type</label><select id="order-type" value={type} onChange={event => setType(event.target.value as "LIMIT" | "MARKET")}><option value="LIMIT">Limit</option><option value="MARKET">Market</option></select><label htmlFor="order-quantity">Quantity <small>Available: {account?.positions.find(position => position.symbol === symbol)?.availableUnits ?? 0} units</small></label><input id="order-quantity" min="1" step="1" type="number" value={quantity} onChange={event => setQuantity(Number(event.target.value))}/>{type === "LIMIT" && <><label htmlFor="limit-price">Limit price <small>₹ INR</small></label><input id="limit-price" inputMode="decimal" min="0.01" step="0.01" type="number" value={price} onChange={event => setPrice(event.target.value)}/></>}<button className={`submit-order ${side.toLowerCase()}`} disabled={busy}>{busy ? "Working…" : `Place ${side.toLowerCase()} order`}</button><p className="demo-disclaimer">Simulated fills only. This does not route to a real exchange.</p></form></section>
-          <OrderBook book={book}/><section className="panel trade-tape"><div className="panel-heading"><h2>Recent executions</h2><span>20-trade average: {money(book?.movingAveragePaise)}</span></div><TradeTable trades={book?.recentTrades?.map(trade => ({ symbol, trade_id: trade.id, price_paise: trade.pricePaise, quantity: trade.quantity, buyer_id: trade.buyerId, seller_id: trade.sellerId, created_at: new Date(trade.createdAt).toISOString() })) ?? []}/></section>
-          <section className="panel orders-panel"><div className="panel-heading"><h2>My open orders</h2><span>Limit orders can be cancelled</span></div><OrderList orders={orders.filter(order => order.symbol === symbol && order.type === "LIMIT" && ["OPEN", "PARTIALLY_FILLED"].includes(order.status) && Number(order.remaining_quantity) > 0)} onCancel={doCancel} busy={busy}/></section>
-        </div>
-      </>}
+      {page === "Trade" && (() => {
+        const currentPos = account?.positions.find(p => p.symbol === symbol);
+        const currentUnits = currentPos?.units ?? 0;
+        const currentUnrealized = currentPos?.unrealizedPaise ?? 0;
+        const totalRealized = account?.realizedPaise ?? 0;
+        return <>
+          <div className="metrics">
+            <Metric label="Last simulated trade" value={money(book?.lastPricePaise ?? current.anchor)}/>
+            <Metric label="Best bid" value={money(book?.bestBid)} tone="green"/>
+            <Metric label="Best ask" value={money(book?.bestAsk)} tone="red"/>
+            <Metric label="Spread" value={money(book?.spreadPaise)}/>
+            <Metric label="Demo cash available" value={money(account?.wallet.availableCashPaise)}/>
+            <Metric label="Realized FIFO P/L" value={money(totalRealized)} tone={totalRealized >= 0 ? "green" : "red"}/>
+            <Metric label={`Unrealized P/L (${symbol})`} value={money(currentUnrealized)} tone={currentUnrealized >= 0 ? "green" : "red"}/>
+            <Metric label={`Holding (${symbol})`} value={`${currentUnits} units`}/>
+          </div>
+          <div className="dashboard-grid"><section className="panel chart-panel"><div className="panel-heading"><div><h2>{current.name} <span className="symbol-tag">{symbol}</span></h2><p>Binance crypto chart</p></div><span className="live-tag"><i/> LIVE CHART</span></div><TradingViewChart symbol={symbol}/><div className="market-note">TradingView charts the Binance crypto pair in USDT. PriceTime order books use separate demo reference prices in INR; fills never route to an exchange.</div></section>
+            <section className="panel ticket"><div className="panel-heading"><h2>Place order</h2><span>{money(account?.wallet.availableCashPaise)} available</span></div><form onSubmit={submitOrder}><div className="side-toggle"><button type="button" className={side === "BUY" ? "active buy" : ""} onClick={() => setSide("BUY")}>Buy</button><button type="button" className={side === "SELL" ? "active sell" : ""} onClick={() => setSide("SELL")}>Sell</button></div><label htmlFor="order-type">Order type</label><select id="order-type" value={type} onChange={event => setType(event.target.value as "LIMIT" | "MARKET")}><option value="LIMIT">Limit</option><option value="MARKET">Market</option></select><label htmlFor="order-quantity">Quantity <small>Available: {account?.positions.find(position => position.symbol === symbol)?.availableUnits ?? 0} units</small></label><input id="order-quantity" min="1" step="1" type="number" value={quantity} onChange={event => setQuantity(Number(event.target.value))}/>{type === "LIMIT" && <><label htmlFor="limit-price">Limit price <small>₹ INR</small></label><input id="limit-price" inputMode="decimal" min="0.01" step="0.01" type="number" value={price} onChange={event => setPrice(event.target.value)}/></>}<button className={`submit-order ${side.toLowerCase()}`} disabled={busy}>{busy ? "Working…" : `Place ${side.toLowerCase()} order`}</button><p className="demo-disclaimer">Simulated fills only. This does not route to a real exchange.</p></form></section>
+            <OrderBook book={book}/><section className="panel trade-tape"><div className="panel-heading"><h2>Recent executions</h2><span>20-trade average: {money(book?.movingAveragePaise)}</span></div><TradeTable trades={book?.recentTrades?.map(trade => ({ symbol, trade_id: trade.id, price_paise: trade.pricePaise, quantity: trade.quantity, buyer_id: trade.buyerId, seller_id: trade.sellerId, created_at: new Date(trade.createdAt).toISOString() })) ?? []}/></section>
+            <section className="panel orders-panel"><div className="panel-heading"><h2>My open orders</h2><span>Limit orders can be cancelled</span></div><OrderList orders={orders.filter(order => order.symbol === symbol && order.type === "LIMIT" && ["OPEN", "PARTIALLY_FILLED"].includes(order.status) && Number(order.remaining_quantity) > 0)} onCancel={doCancel} busy={busy}/></section>
+          </div>
+        </>;
+      })()}
       {page === "Portfolio" && <Portfolio account={account}/>}{page === "Reports" && <Reports trades={trades}/>}{page === "Replay" && <Replay symbol={symbol} setNotice={setNotice}/>}
       <p className="notice" aria-live="polite">{notice}</p><footer className="site-footer">PriceTime is a classroom paper-trading simulator. No deposits, withdrawals, or real crypto transactions. <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">Charts by TradingView</a>.</footer>
     </section>
@@ -64,7 +104,19 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: s
 function OrderBook({ book }: { book?: Book }) { return <section className="panel order-book"><div className="panel-heading"><h2>Order book</h2><span>Top five levels · aggregated</span></div><div className="depth-head"><span>Price (₹)</span><span>Qty</span></div><div className="levels asks">{[...(book?.asks ?? [])].reverse().map(level => <div className="depth-row" key={level.pricePaise}><span>{money(level.pricePaise)}</span><span>{level.quantity}</span><i style={{ width: `${Math.min(100, level.quantity * 2)}%` }}/></div>)}{!book?.asks?.length && <p className="empty">No sell orders</p>}</div><div className="spread-line">Spread <b>{money(book?.spreadPaise)}</b></div><div className="levels bids">{book?.bids?.map(level => <div className="depth-row" key={level.pricePaise}><span>{money(level.pricePaise)}</span><span>{level.quantity}</span><i style={{ width: `${Math.min(100, level.quantity * 2)}%` }}/></div>)}{!book?.bids?.length && <p className="empty">No buy orders</p>}</div></section>; }
 function TradeTable({ trades }: { trades: TradeRow[] }) { return <div className="table-wrap"><table><thead><tr><th>Time</th><th>Price</th><th>Qty</th><th>Buyer → seller</th></tr></thead><tbody>{trades.length ? trades.slice(0, 20).map(trade => <tr key={`${trade.symbol}-${trade.trade_id}`}><td>{new Date(trade.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</td><td>{money(Number(trade.price_paise))}</td><td>{trade.quantity}</td><td>{shortId(trade.buyer_id)} → {shortId(trade.seller_id)}</td></tr>) : <tr><td colSpan={4} className="empty-row">No trades yet. Submit a crossing order to create an execution.</td></tr>}</tbody></table></div>; }
 function OrderList({ orders, onCancel, busy }: { orders: OrderRow[]; onCancel: (order: OrderRow) => void; busy: boolean }) { return <div className="table-wrap"><table><thead><tr><th>ID</th><th>Side</th><th>Price</th><th>Remaining</th><th>Status</th><th/></tr></thead><tbody>{orders.length ? orders.map(order => <tr key={`${order.symbol}-${order.order_id}`}><td>{order.symbol}-{order.order_id}</td><td className={order.side.toLowerCase()}>{order.side}</td><td>{money(Number(order.limit_price_paise ?? 0))}</td><td>{order.remaining_quantity}</td><td>{order.status.toLowerCase().replace(/_/g, " ")}</td><td><button className="cancel-button" disabled={busy} onClick={() => onCancel(order)}>Cancel</button></td></tr>) : <tr><td colSpan={6} className="empty-row">You have no open limit orders for this crypto.</td></tr>}</tbody></table></div>; }
-function Portfolio({ account }: { account?: Account }) { return <section className="content-panel"><div className="metrics two"><Metric label="Available demo cash" value={money(account?.wallet.availableCashPaise)}/><Metric label="Realized FIFO P/L" value={money(account?.realizedPaise)} tone={(account?.realizedPaise ?? 0) >= 0 ? "green" : "red"}/></div><div className="panel"><div className="panel-heading"><h2>Positions and cost basis</h2><span>Unrealized P/L uses last simulated execution</span></div><div className="table-wrap"><table><thead><tr><th>Symbol</th><th>Units</th><th>Available / reserved</th><th>Avg. cost</th><th>Last trade</th><th>Unrealized P/L</th></tr></thead><tbody>{account?.positions.map(position => <tr key={position.symbol}><td><strong>{position.symbol}</strong></td><td>{position.units}</td><td>{position.availableUnits} / {position.reservedUnits}</td><td>{money(position.averageCostPaise)}</td><td>{money(position.lastPricePaise)}</td><td className={position.unrealizedPaise >= 0 ? "green" : "red"}>{money(position.unrealizedPaise)}</td></tr>)}</tbody></table></div></div><div className="panel"><div className="panel-heading"><h2>Order history</h2><span>Latest 100 orders</span></div><OrderList orders={account?.orders ?? []} onCancel={() => undefined} busy/></div></section>; }
+function Portfolio({ account }: { account?: Account }) {
+  const totalRealized = account?.realizedPaise ?? 0;
+  const totalUnrealized = account?.positions.reduce((acc, p) => acc + (p.unrealizedPaise ?? 0), 0) ?? 0;
+  const netPnL = totalRealized + totalUnrealized;
+  return <section className="content-panel">
+    <div className="metrics four">
+      <Metric label="Available demo cash" value={money(account?.wallet.availableCashPaise)}/>
+      <Metric label="Realized FIFO P/L" value={money(totalRealized)} tone={totalRealized >= 0 ? "green" : "red"}/>
+      <Metric label="Unrealized P/L (Total)" value={money(totalUnrealized)} tone={totalUnrealized >= 0 ? "green" : "red"}/>
+      <Metric label="Net Total P/L" value={money(netPnL)} tone={netPnL >= 0 ? "green" : "red"}/>
+    </div>
+    <div className="panel"><div className="panel-heading"><h2>Positions and cost basis</h2><span>Unrealized P/L uses last simulated execution</span></div><div className="table-wrap"><table><thead><tr><th>Symbol</th><th>Units</th><th>Available / reserved</th><th>Avg. cost</th><th>Last trade</th><th>Unrealized P/L</th></tr></thead><tbody>{account?.positions.map(position => <tr key={position.symbol}><td><strong>{position.symbol}</strong></td><td>{position.units}</td><td>{position.availableUnits} / {position.reservedUnits}</td><td>{money(position.averageCostPaise)}</td><td>{money(position.lastPricePaise)}</td><td className={position.unrealizedPaise >= 0 ? "green" : "red"}>{money(position.unrealizedPaise)}</td></tr>)}</tbody></table></div></div><div className="panel"><div className="panel-heading"><h2>Order history</h2><span>Latest 100 orders</span></div><OrderList orders={account?.orders ?? []} onCancel={() => undefined} busy/></div></section>;
+}
 function Reports({ trades }: { trades: TradeRow[] }) {
   const [query, setQuery] = useState(""); const [sort, setSort] = useState<SortName>("Merge"); const [sortBy, setSortBy] = useState<"price" | "quantity" | "time">("time"); const [result, setResult] = useState<{ items: TradeRow[]; ms: number }>();
   const matching = useMemo(

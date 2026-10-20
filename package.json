@@ -1,6 +1,7 @@
 {
   "name": "pricetime",
   "private": true,
+  "description": "PriceTime — Multi-crypto paper trading exchange with BST/DLL matching, circular lists, stacks, sorting algorithms, FIFO P&L, TradingView charts, and Neon Postgres (Demo funds only)",
   "workspaces": [
     "apps/*"
   ],
