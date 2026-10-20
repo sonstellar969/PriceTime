@@ -184,7 +184,21 @@ async function initializeDemoBooks() {
   finally { client.release(); }
 }
 async function ensureAccount(client: PoolClient, user: Principal, maker = false) {
-  await client.query("insert into mf_users(id,email,display_name) values($1,$2,$3) on conflict(id) do update set email=excluded.email,display_name=excluded.display_name", [user.id, user.email || `${user.id}@auth.pricetime`, user.name || "Paper trader"]);
+  const email = user.email || `${user.id}@auth.pricetime`;
+  const name = user.name || "Paper trader";
+  const existingById = await client.query("select id from mf_users where id=$1", [user.id]);
+  if (existingById.rowCount) {
+    await client.query("update mf_users set email=$2, display_name=$3 where id=$1", [user.id, email, name]);
+  } else {
+    const existingByEmail = await client.query("select id from mf_users where email=$1", [email]);
+    if (existingByEmail.rowCount) {
+      const oldId = existingByEmail.rows[0].id;
+      await client.query("update mf_users set id=$1, display_name=$2 where email=$3", [user.id, name, email]);
+      await client.query("update mf_order_events set payload = jsonb_set(payload, '{traderId}', to_jsonb($1::text)) where payload->>'traderId' = $2", [user.id, oldId]);
+    } else {
+      await client.query("insert into mf_users(id,email,display_name) values($1,$2,$3)", [user.id, email, name]);
+    }
+  }
   await client.query("insert into mf_wallets(user_id,available_cash_paise,reserved_cash_paise) values($1,$2,0) on conflict(user_id) do nothing", [user.id, maker ? 1_000_000_000_000 : 10_000_000]);
   for (const symbol of symbols) {
     const quantity = maker ? 1_000_000 : 10;

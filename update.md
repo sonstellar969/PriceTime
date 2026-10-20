@@ -75,7 +75,10 @@ PriceTime tracks and renders Realized and Unrealized P/L in real time:
 - [x] Replay benchmark verifying exact trade sequence, price, and quantity equivalence against the plain-array baseline.
 - [x] TradingView live crypto chart widgets for all 5 coins (DOGE, XRP, ADA, TRX, AVAX).
 - [x] Neon Managed Auth integration and Postgres transactional persistence.
+- [x] Account identity reconciliation and foreign key `ON UPDATE CASCADE` migration ensuring seamless session logins without `mf_users_email_idx` unique violations.
+- [x] JSONB event log migration updating event payload trader IDs on user reconciliation.
 - [x] 26 unit and integration tests passing (`npm test`).
+- [x] 9-stage end-to-end automated API feature test suite passing (`npm run test:e2e`).
 - [x] Production build passing (`npm run build`).
 
 ### Pending / Sensible future enhancements (Out of scope for coursework rubric)
@@ -91,6 +94,16 @@ PriceTime tracks and renders Realized and Unrealized P/L in real time:
   - `src/engine/dataStructures.test.ts` (CircularLinkedList invariant `tail.next === head`, wraparound overwrite, moving average, Stack LIFO operations, DoublyLinkedQueue FIFO and unlinking)
   - `src/engine/algorithms.test.ts` (linearSearch, linearSearchFirst, binarySearch, Bubble, Selection, Insertion, Merge, and Quick sort on empty, singleton, reverse, duplicate, random, and trade records)
   - `src/engine/edgeCases.test.ts` (CLL pointer verification, linked Stack audit history, binarySearch O(log n) order lookup, market orders with zero/partial liquidity, multi-price level sweep, cancellation edge cases, OrderBook vs arrayReplay benchmark sequence equivalence, FIFO lots realized P/L)
+- `npm run test:e2e`: 9-stage end-to-end integration test suite passes against the live running API:
+  - 1. Health check & database connection
+  - 2. Neon Auth user registration & EdDSA JWT issuance
+  - 3. Symbols metadata retrieval (DOGE, XRP, ADA, TRX, AVAX)
+  - 4. Account bootstrap: ₹100,000 cash, 10 units each across 5 assets, 0 realized P&L
+  - 5. Order book snapshots, BST levels, and Circular Linked List moving average
+  - 6. Resting Limit Buy order placement and ₹90.00 cash reservation
+  - 7. Order cancellation and ₹90.00 cash refund
+  - 8. Sell trade execution against maker bid with FIFO lot consumption and Realized P&L calculation
+  - 9. Replay engine benchmark with BST/DLL vs Array replay exact sequence equivalence
 - `npm run build`: API TypeScript build (`tsc -p tsconfig.json`) and frontend production build (`tsc -b && vite build`) both succeed with zero errors.
 - Replay benchmark now compares full trade sequence, price, and quantity equivalence rather than just total trade count.
 - GitHub repository description updated via `gh repo edit`.

@@ -105,6 +105,7 @@ Build and test:
 ```bash
 npm run build
 npm test
+npm run test:e2e -w @pricetime/api
 npm run db:generate -w @pricetime/api
 npm run db:migrate -w @pricetime/api
 ```
