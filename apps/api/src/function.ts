@@ -164,7 +164,11 @@ app.post("/api/orders", async c => {
     const orderRows = await client.query("select * from mf_orders where symbol=$1 and order_id=any($2::int[]) for update", [input.symbol, [...new Set(result.changedOrders.map(order => order.id))]]);
     const orderById = new Map<number, any>(orderRows.rows.map(row => [row.order_id, row]));
     for (const trade of result.trades) await settleTrade(client, trade, orderById);
-    if (input.type === "MARKET" && result.order.remaining > 0) await releaseRemainder(client, orderById.get(orderId));
+    if (input.type === "MARKET" && result.order.remaining > 0) {
+      await releaseRemainder(client, orderById.get(orderId));
+      result.order.status = result.trades.length ? "PARTIALLY_FILLED" : "REJECTED";
+      result.order.remaining = 0;
+    }
     for (const changed of result.changedOrders) {
       const row = orderById.get(changed.id)!;
       await client.query("update mf_orders set remaining_quantity=$3,status=$4,reserved_cash_paise=$5,reserved_shares=$6 where symbol=$1 and order_id=$2", [input.symbol, changed.id, changed.remaining, changed.status, Number(row.reserved_cash_paise), row.reserved_shares]);
@@ -211,7 +215,7 @@ app.delete("/api/orders/:symbol/:id", async c => {
     const cash = Number(row.reserved_cash_paise), shares = Number(row.reserved_shares);
     if (cash) await client.query("update mf_wallets set available_cash_paise=available_cash_paise+$2,reserved_cash_paise=reserved_cash_paise-$2,updated_at=now() where user_id=$1", [row.user_id, cash]);
     if (shares) await client.query("update mf_positions set available_shares=available_shares+$3,reserved_shares=reserved_shares-$3 where user_id=$1 and symbol=$2", [row.user_id, symbol, shares]);
-    await client.query("update mf_orders set status='CANCELLED',reserved_cash_paise=0,reserved_shares=0,cancelled_at=now() where symbol=$1 and order_id=$2", [symbol, orderId]);
+    await client.query("update mf_orders set status='CANCELLED',remaining_quantity=0,reserved_cash_paise=0,reserved_shares=0,cancelled_at=now() where symbol=$1 and order_id=$2", [symbol, orderId]);
     await client.query("insert into mf_order_events(symbol,kind,order_id,payload) values($1,'cancel',$2,'{}'::jsonb)", [symbol, orderId]);
     await client.query("commit");
     return c.json({ cancelled: true, snapshot: await readBook(symbol) });
