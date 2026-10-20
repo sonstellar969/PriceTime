@@ -26,20 +26,154 @@ The chart widget uses exchange-qualified crypto symbols such as `BINANCE:DOGEUSD
 - GitHub Actions workflow builds and publishes the static frontend to GitHub Pages.
 - Neon schema/migrations as code, with Neon project configuration in `neon.ts`.
 
-## Data structures
+## Data Structures & Algorithms — Topics Used, Locations & Logic
 
-| Project requirement | Implemented structure | Role |
-|---|---|---|
-| Bid and ask price levels | Two ordinary BSTs per symbol | Find the best sell (minimum) and best buy (maximum); delete an empty level. |
-| FIFO orders per price | Doubly linked queue at each level | Preserve time priority and unlink cancelled orders in O(1) after ID lookup. |
-| Locate order ID | Sorted append-only ID array with binary search | IDs increase monotonically; binary search provides O(log n) order lookup. |
-| Trade tape | Singly linked list | Append executions in match order via `Trade.next`. |
-| Recent execution average | Circular linked list (`tail.next === head`) | Overwrite oldest node in O(1) on capacity and compute the 20-trade moving average. |
-| Audit action history | Singly linked stack (`Stack<T>`) | Push order submit/cancel actions in LIFO order for engine audit tracking. |
-| Cost basis | FIFO lot records in Postgres, consumed FIFO | Calculate realized profit/loss as crypto units are sold. |
-| Trader search | Linear search (`linearSearch`) | Pure sequential search scanning trade history by trader ID and symbol. |
-| Sort reports | Bubble, selection, insertion, merge, quick | Five pure standalone sorting implementations with millisecond timing. |
-| Replay comparison | Custom engine versus array scan | Compare identical CSV input verifying matching trade counts, prices, and quantities. |
+PriceTime is architected around foundational data structures and classical algorithms to implement an exchange-grade matching engine and high-performance financial reporting desk.
+
+### Quick Reference Matrix
+
+| Required Topic | File Location | Data Structure / Function | Role in PriceTime | Time / Space Complexity |
+|---|---|---|---|---|
+| **Linear Search** | `apps/web/src/algorithms/search.ts`<br>`apps/api/src/engine/algorithms.ts` | `linearSearch()`, `linearSearchFirst()` | Filters execution history in Reports desk and provides fallback lookup | $O(n)$ Time / $O(1)$ Space |
+| **Binary Search** | `apps/web/src/algorithms/search.ts`<br>`apps/api/src/engine/algorithms.ts` | `binarySearch()`, `OrderBook.findOrder()` | Fast $O(\log n)$ order ID lookup for status queries and cancellation | $O(\log n)$ Time / $O(1)$ Space |
+| **Singly Linked List (SLL)** | `apps/api/src/engine/orderBook.ts`<br>`apps/api/src/engine/dataStructures.ts` | `Trade.next`, `tradeHead`, `tradeTail`, `StackNode<T>` | Chronological execution tape and backing nodes for stack frames | $O(1)$ Append / $O(n)$ Space |
+| **Circular Linked List (CLL)** | `apps/api/src/engine/dataStructures.ts`<br>`apps/api/src/engine/orderBook.ts` | `CircularLinkedList<T>` (`tail.next === head`) | Ring buffer tracking the 20-trade rolling execution price moving average | $O(1)$ Overwrite / $O(k)$ Space |
+| **Doubly Linked List (DLL)** | `apps/api/src/engine/orderBook.ts`<br>`apps/api/src/engine/dataStructures.ts` | `PriceLevel` (`Order.prev`, `Order.next`), `DoublyLinkedQueue<T>` | Holds resting orders at each price level; enables $O(1)$ arbitrary unlinking on cancel | $O(1)$ Insert/Delete / $O(n)$ Space |
+| **Queue (Linked List)** | `apps/api/src/engine/orderBook.ts`<br>`apps/api/src/engine/dataStructures.ts` | `PriceLevel.enqueue()`, `DoublyLinkedQueue<T>` | Enforces strict First-In, First-Out (FIFO) time priority among orders at the same price | $O(1)$ Enqueue/Dequeue / $O(n)$ Space |
+| **Stack (Linked List)** | `apps/api/src/engine/dataStructures.ts`<br>`apps/api/src/engine/orderBook.ts` | `Stack<T>` (`actionStack`), `StackNode<T>` | Last-In, First-Out (LIFO) engine audit history for submits and cancellations | $O(1)$ Push/Pop / $O(n)$ Space |
+| **Binary Search Tree (BST)** | `apps/api/src/engine/orderBook.ts` | `PriceTree` (`BSTNode<PriceLevel>`), `buyTree`, `sellTree` | Maintains discrete price levels; queries Best Bid (max) and Best Ask (min) | $O(\log k)$ Avg Search/Insert/Delete |
+| **Bubble Sort** | `apps/web/src/algorithms/sorts.ts`<br>`apps/api/src/engine/algorithms.ts` | `bubbleSort()` | Sorts user trade reports with early-termination optimization | $O(n^2)$ Worst/Avg, $O(n)$ Best |
+| **Selection Sort** | `apps/web/src/algorithms/sorts.ts`<br>`apps/api/src/engine/algorithms.ts` | `selectionSort()` | Sorts trade reports by finding successive minimum values in-place | $O(n^2)$ Comparisons, $O(n)$ Swaps |
+| **Insertion Sort** | `apps/web/src/algorithms/sorts.ts`<br>`apps/api/src/engine/algorithms.ts` | `insertionSort()` | Sorts trade reports by shifting larger elements into sorted subarrays | $O(n^2)$ Worst, $O(n)$ Best (nearly sorted) |
+| **Merge Sort** | `apps/web/src/algorithms/sorts.ts`<br>`apps/api/src/engine/algorithms.ts` | `mergeSort()` | Stable divide-and-conquer sorting for high-volume trade reports | $O(n \log n)$ Time / $O(n)$ Space |
+| **Quick Sort** | `apps/web/src/algorithms/sorts.ts`<br>`apps/api/src/engine/algorithms.ts` | `quickSort()` | In-place Hoare-partitioned divide-and-conquer sorting for trade reports | $O(n \log n)$ Avg Time / $O(\log n)$ Space |
+| **FIFO Lots (Accounting)** | `apps/api/src/function.ts`<br>`mf_portfolio_lots`, `mf_realized_pnl` | `settleTrade()` | Realized P/L calculation consuming oldest purchase lots first on asset sales | Strict chronological tax-lot matching |
+
+---
+
+### Detailed Breakdown of Topics, Usage & Underlying Logics
+
+#### 1. Linear Search
+- **Where Used**: 
+  - `apps/web/src/algorithms/search.ts` (`linearSearch`, `linearSearchFirst`)
+  - `apps/api/src/engine/algorithms.ts`
+  - Integrated in `apps/web/src/main.tsx` in the **Reports Desk** search bar to filter execution rows by user ID, order ID, or symbol.
+  - Used as a defensive fallback in `OrderBook.findOrder(id)` in `apps/api/src/engine/orderBook.ts`.
+- **Logic**:
+  - Starts at index `0` and steps sequentially through each item $i$ up to $n - 1$.
+  - Evaluates a predicate function `predicate(item, index)`. If true, the item is collected (or immediately returned in `linearSearchFirst`).
+  - Does not require elements to be ordered or pre-indexed.
+  - Worst and average time complexity: $O(n)$; space complexity: $O(1)$.
+
+#### 2. Binary Search
+- **Where Used**: 
+  - `apps/web/src/algorithms/search.ts` and `apps/api/src/engine/algorithms.ts` (`binarySearch`)
+  - Integrated in `apps/api/src/engine/orderBook.ts` in `OrderBook.findOrder(id)` to locate orders in $O(\log n)$ time.
+- **Logic**:
+  - Operates over an array sorted strictly monotonically by key (such as the engine's append-only `orders` array indexed by monotonic `orderId`).
+  - Maintains `low = 0` and `high = array.length - 1`. At each step, calculates the midpoint `mid = Math.floor((low + high) / 2)` and extracts the key using `keySelector(array[mid])`.
+  - If `key === target`, returns `{ found: true, index: mid, item: array[mid] }`.
+  - If `key < target`, discards the lower half by updating `low = mid + 1`.
+  - If `key > target`, discards the upper half by updating `high = mid - 1`.
+  - Halves the candidate search space in every iteration, achieving $O(\log n)$ time complexity.
+
+#### 3. Singly Linked List (SLL)
+- **Where Used**:
+  - `apps/api/src/engine/orderBook.ts` (`Trade.next`, `tradeHead`, `tradeTail`).
+  - `apps/api/src/engine/dataStructures.ts` (`StackNode<T>`).
+- **Logic**:
+  - Each node contains its payload (`Trade` execution details or generic data `value`) and a single directional reference (`next`) pointing to the following node or `null`.
+  - **Trade Execution Tape**: As trades execute, a new `Trade` node is appended to `tradeTail.next` and `tradeTail` is updated in $O(1)$ time without resizing dynamic arrays.
+  - Iteration traverses from `tradeHead` through `node.next` until `null`, providing an unalterable chronological record of executions.
+
+#### 4. Circular Linked List (CLL)
+- **Where Used**:
+  - `apps/api/src/engine/dataStructures.ts` (`CircularLinkedList<T>`).
+  - Integrated in `apps/api/src/engine/orderBook.ts` to power the rolling **20-trade execution price moving average**.
+- **Logic**:
+  - An explicit linked node structure with `head`, `tail`, `capacity` (20), and `length`.
+  - **Invariant Guarantee**: `tail.next === head` is maintained at all times, forming a closed ring (verified by unit tests).
+  - **Ring Buffer Overwrite**: When the list reaches its capacity of 20 elements, appending a new trade price does not reallocate memory; instead, it overwrites the oldest node at `head`, reassigns `tail = head`, and advances `head = head.next`, maintaining the circular invariant in $O(1)$ time.
+  - **Moving Average Computation**: Traverses the ring from `head` along `next` pointers for exactly `length` steps, accumulating prices to compute $\frac{\sum \text{pricePaise}}{\text{count}}$ in integer paise.
+
+#### 5. Doubly Linked List (DLL)
+- **Where Used**:
+  - `apps/api/src/engine/orderBook.ts` (Order chaining in `PriceLevel` via `Order.prev` and `Order.next`).
+  - `apps/api/src/engine/dataStructures.ts` (`DoublyLinkedQueue<T>`).
+- **Logic**:
+  - Nodes maintain bidirectional links: `prev` points to the preceding order, and `next` points to the succeeding order.
+  - **$O(1)$ Arbitrary Node Deletion**: When an order is cancelled or filled, it is removed without scanning or shifting an array:
+    ```typescript
+    if (order.prev) order.prev.next = order.next;
+    else this.head = order.next;
+    if (order.next) order.next.prev = order.prev;
+    else this.tail = order.prev;
+    order.prev = order.next = null;
+    ```
+  - This guarantees that order cancellations from the middle of deep price queues execute in $O(1)$ time without disrupting time priority.
+
+#### 6. Queue Using Linked Lists (FIFO)
+- **Where Used**:
+  - `apps/api/src/engine/orderBook.ts` (`PriceLevel` queue management).
+  - `apps/api/src/engine/dataStructures.ts` (`DoublyLinkedQueue<T>`).
+- **Logic**:
+  - Enforces strict **First-In, First-Out (FIFO)** time priority for orders resting at the identical limit price level.
+  - `enqueue(order)` appends to the queue's `tail` in $O(1)$ time.
+  - When liquidity is taken, `head` supplies the earliest resting order first.
+  - Guarantees fairness: orders placed earlier at the same price level are fully matched before later orders receive fills.
+
+#### 7. Stack Using Linked Lists (LIFO)
+- **Where Used**:
+  - `apps/api/src/engine/dataStructures.ts` (`Stack<T>`).
+  - Integrated in `apps/api/src/engine/orderBook.ts` as `actionStack` to track engine operations (`SUBMIT`, `CANCEL`, `FILL`).
+- **Logic**:
+  - Implements a linked **Last-In, First-Out (LIFO)** data structure with `top` pointing to a `StackNode<T>`.
+  - `push(item)` allocates a new node with `node.next = top`, and updates `top = node` in $O(1)$ time.
+  - `pop()` reads `top.value`, updates `top = top.next`, and returns the most recent action in $O(1)$ time.
+  - Provides instant access to the most recent engine events for audit logs, telemetry, and debugging.
+
+#### 8. Binary Search Tree (BST)
+- **Where Used**:
+  - `apps/api/src/engine/orderBook.ts` (`PriceTree`, `BSTNode<PriceLevel>`).
+  - Instantiated twice per symbol: `buyTree` (bids) and `sellTree` (asks).
+- **Logic**:
+  - Each tree node represents a discrete `PriceLevel` keyed by its integer `pricePaise`, containing the doubly-linked queue of orders at that price.
+  - **Best Price Retrieval**:
+    - **Bids (`buyTree`)**: Highest buy price is found at the rightmost node by calling `max()` in $O(\text{depth})$ time.
+    - **Asks (`sellTree`)**: Lowest sell price is found at the leftmost node by calling `min()` in $O(\text{depth})$ time.
+  - **Tree Pruning on Depletion**: When all orders at a price level are filled or cancelled, the level node is removed from the BST via standard tree deletion, gracefully handling:
+    - Leaf nodes (direct removal).
+    - Single-child nodes (splicing parent to child).
+    - Two-child nodes (replacing node with in-order successor, maintaining tree invariant).
+  - Yields $O(\log k)$ average search, insertion, and deletion where $k$ is the number of active price levels.
+
+#### 9–13. Five Sorting Algorithms
+Implemented in `apps/web/src/algorithms/sorts.ts` and `apps/api/src/engine/algorithms.ts`, and interactively selectable in the **Reports Desk** UI:
+
+1. **Bubble Sort (`bubbleSort`)**:
+   - Iteratively scans the array, comparing adjacent elements `arr[i]` and `arr[i + 1]`.
+   - Swaps them if they violate the comparator order.
+   - Includes an early-termination optimization: if a full pass completes with `swapped === false`, sorting terminates immediately ($O(n)$ best case). Worst/Average: $O(n^2)$.
+2. **Selection Sort (`selectionSort`)**:
+   - Partitions the array into a sorted prefix and an unsorted suffix.
+   - In each pass, finds the minimum element in the unsorted region and performs a single swap with the first element of that region.
+   - Minimizes memory writes ($O(n)$ swaps), with $O(n^2)$ comparisons.
+3. **Insertion Sort (`insertionSort`)**:
+   - Progressively constructs a sorted array from left to right.
+   - For each element, shifts preceding elements that are greater to the right until the correct insertion slot is cleared.
+   - Adaptive performance: runs in $O(n)$ time on nearly sorted trade logs; $O(n^2)$ worst case.
+4. **Merge Sort (`mergeSort`)**:
+   - Divide-and-conquer algorithm.
+   - Recursively splits the array into two halves at `mid = Math.floor(len / 2)` until arrays of length 1 are reached.
+   - Merges the two sorted halves using two pointers into a temporary buffer, preserving stability.
+   - Guarantees $O(n \log n)$ time complexity on all inputs.
+5. **Quick Sort (`quickSort`)**:
+   - Divide-and-conquer algorithm using Hoare-style partitioning.
+   - Selects a pivot element and partitions the array such that all elements smaller than the pivot appear to its left and larger elements appear to its right.
+   - Recursively sorts the left and right partitions in-place.
+   - Average time complexity: $O(n \log n)$; space complexity: $O(\log n)$ recursion stack.
+
+---
 
 The matching algorithm remains in `apps/api/src/engine/orderBook.ts`. Postgres stores durable state; the API reconstructs the in-memory BST and DLL from the append-only order event history before applying new writes. This keeps the DS implementation responsible for selecting fills and surviving Function restarts. Order updates, balance settlement, FIFO lots, and trade records are committed together.
 
