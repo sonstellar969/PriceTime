@@ -1,6 +1,6 @@
 # PriceTime — Crypto Paper Exchange
 
-PriceTime is a multi-crypto paper-trading web app and data-structures project. It has user authentication, persistent demo accounts in Neon Postgres, a custom price-time matching engine, live TradingView crypto charts, and an order replay benchmark. Charts display external USDT market data; all PriceTime orders and INR balances are simulated, with no real crypto transactions.
+PriceTime is a multi-crypto paper-trading web app and data-structures project. It has user authentication, persistent demo accounts in Neon Postgres, a custom price-time matching engine, live TradingView crypto charts, and an order replay benchmark. Charts display external USDT market data; all PriceTime orders and USD balances are simulated, with no real crypto transactions.
 
 The chart widget uses exchange-qualified crypto symbols such as `BINANCE:DOGEUSDT`. The earlier NSE-style equity symbols are intentionally not used: they are not available through this widget's data source in this setup. TradingView's embed is a chart widget, not a general market-data REST API; its free chart data and real-time status depend on the selected exchange and TradingView entitlements.
 
@@ -13,16 +13,16 @@ The chart widget uses exchange-qualified crypto symbols such as `BINANCE:DOGEUSD
 
 - Responsive React + TypeScript web app with Trade, Portfolio, Reports, and Replay views.
 - Neon Managed Auth email/password sign-up, sign-in, session restore, and sign-out.
-- First login provisions a ₹100,000 demo wallet and 10 demo units per supported crypto.
+- First login provisions a $500,000 demo wallet (starts with 0 crypto holdings until purchased).
 - PostgreSQL persistence for profiles, demo wallets, reserved money/units, positions, FIFO lots, orders, executions, order events, realized P/L, and replay runs.
 - A deployed Neon Function API that authenticates Managed Auth JWTs, queries the pooled Postgres URL, and serializes order writes with a Postgres transaction lock.
 - Crypto order books: `BTC`, `ETH`, `DOGE`, `XRP`, `ADA`, `TRX`, and `AVAX`.
-- Limit and market orders, price priority, FIFO time priority, partial fills, self-trade prevention, cancellation, integer-paise accounting, and cash/unit reservations.
+- Limit and market orders, price priority, FIFO time priority, partial fills, self-trade prevention, cancellation, integer-cent accounting, and cash/unit reservations.
 - Best bid/ask, spread, top-five levels, execution tape, and 20-trade circular moving average.
 - FIFO realized P/L and current holding cost basis; unrealized P/L uses the latest simulated fill.
 - Search and five implemented report sorts: bubble, selection, insertion, merge, and quick sort.
 - CSV replay up to 10,000 orders. Compares the BST/DLL engine with an array book and records run metrics.
-- TradingView Advanced Chart widget for Binance spot pairs `BTCUSDT`, `ETHUSDT`, `DOGEUSDT`, `XRPUSDT`, `ADAUSDT`, `TRXUSDT`, and `AVAXUSDT`. Charts show live/public USDT-market data; the paper order book remains separate and INR-denominated.
+- TradingView Advanced Chart widget for Binance spot pairs `BTCUSDT`, `ETHUSDT`, `DOGEUSDT`, `XRPUSDT`, `ADAUSDT`, `TRXUSDT`, and `AVAXUSDT`. Real-time price tracking and ticker strip synchronized with Binance live market data.
 - GitHub Actions workflow builds and publishes the static frontend to GitHub Pages.
 - Neon schema/migrations as code, with Neon project configuration in `neon.ts`.
 
@@ -187,21 +187,21 @@ The matching algorithm remains in `apps/api/src/engine/orderBook.ts`. Postgres s
 6. The same database transaction settles cash, reserved units, FIFO lots, order statuses, trade rows, and the event log.
 7. The web app refreshes account and order-book state every three seconds. TradingView provides the separate public market chart.
 
-Money uses integer paise in the engine and database: ₹101.00 is `10100`. No floating-point prices are used for order matching or settlement.
+Money uses integer cents in the engine and database: $101.00 is `10100`. No floating-point prices are used for order matching or settlement.
 
 ## How P&L (Profit & Loss) and FIFO Lots Work
 
-PriceTime tracks two kinds of profit and loss in real time with integer-paise precision:
+PriceTime tracks two kinds of profit and loss in real time with integer-cent precision:
 
 1. **Realized FIFO P&L**:
    - When a trader sells crypto units, the backend consumes the trader's oldest unconsumed purchase lots (`mf_portfolio_lots` ordered by `opened_at, id`).
    - Units are deducted from the earliest lot (First-In, First-Out accounting).
-   - $\text{Cost Basis} = \sum (\text{units consumed} \times \text{unit cost paise})$.
-   - $\text{Proceeds} = \text{units sold} \times \text{execution price paise}$.
+   - $\text{Cost Basis} = \sum (\text{units consumed} \times \text{unit cost cents})$.
+   - $\text{Proceeds} = \text{units sold} \times \text{execution price cents}$.
    - $\text{Realized P/L} = \text{proceeds} - \text{cost basis}$.
    - Persisted in `mf_realized_pnl` and immediately reflected in account summaries.
 2. **Unrealized P&L**:
-   - Calculated per position: $(\text{last trade price paise} \times \text{units held}) - \text{remaining cost basis paise}$.
+   - Calculated per position: $(\text{last trade price cents} \times \text{units held}) - \text{remaining cost basis cents}$.
    - Updates as simulated market prices shift and new trades execute.
 3. **Live Visibility**:
    - **Trade Desk**: Displays the trader's all-time **Realized FIFO P/L**, the active crypto's **Unrealized P/L**, and current holding quantity directly in the top metric strip. When an order is placed and filled, account balances and P/L are immediately re-fetched and updated.

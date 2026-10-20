@@ -12,13 +12,13 @@ const symbols = ["BTC", "ETH", "DOGE", "XRP", "ADA", "TRX", "AVAX"] as const;
 type SymbolType = (typeof symbols)[number];
 
 const anchors: Record<SymbolType, number> = {
-  BTC: 7500000,
-  ETH: 2500000,
-  DOGE: 2000,
-  XRP: 22000,
-  ADA: 6000,
-  TRX: 2800,
-  AVAX: 250000
+  BTC: 8150000,
+  ETH: 238800,
+  DOGE: 8,
+  XRP: 130,
+  ADA: 22,
+  TRX: 33,
+  AVAX: 943
 };
 
 export function normalizeSymbol(value: unknown): SymbolType | undefined {
@@ -94,7 +94,7 @@ app.get("/api/symbols", c => c.json(symbols.map(symbol => ({
   symbol,
   name: companyName(symbol),
   exchange: "BINANCE",
-  currency: "INR",
+  currency: "USD",
   referencePricePaise: anchors[symbol]
 }))));
 app.get("/api/account", async c => {
@@ -219,7 +219,10 @@ app.post("/api/orders", async c => {
       const position = (await client.query("select available_shares from mf_positions where user_id=$1 and symbol=$2 for update", [user.id, input.symbol])).rows[0];
       if (!position || position.available_shares < input.quantity) { await client.query("rollback"); return c.json({ error: "Not enough available demo units." }, 422); }
     }
-    const orderId = book.peekNextOrderId();
+    const maxOrderRes = await client.query("select coalesce(max(order_id), 0)::int as max_id from mf_orders where symbol=$1", [input.symbol]);
+    const maxDbId = Number(maxOrderRes.rows[0]?.max_id ?? 0);
+    const orderId = Math.max(maxDbId + 1, book.peekNextOrderId());
+    (input as any).orderId = orderId;
     if (reserveCash) await client.query("update mf_wallets set available_cash_paise=available_cash_paise-$2,reserved_cash_paise=reserved_cash_paise+$2,updated_at=now() where user_id=$1", [user.id, reserveCash]);
     if (reserveShares) await client.query("update mf_positions set available_shares=available_shares-$3,reserved_shares=reserved_shares+$3 where user_id=$1 and symbol=$2", [user.id, input.symbol, reserveShares]);
     await client.query("insert into mf_orders(symbol,order_id,user_id,side,type,limit_price_paise,original_quantity,remaining_quantity,status,reserved_cash_paise,reserved_shares) values($1,$2,$3,$4,$5,$6,$7,$7,'OPEN',$8,$9)", [input.symbol, orderId, user.id, input.side, input.type, input.pricePaise ?? null, input.quantity, reserveCash, reserveShares]);
@@ -336,8 +339,16 @@ async function initializeDemoBooks() {
       const count = Number((await client.query("select count(*)::int as count from mf_order_events where symbol=$1", [symbol])).rows[0].count);
       if (count) continue;
       const book = new OrderBook(symbol);
-      for (const [side, pricePaise] of [["BUY", anchors[symbol] - 100], ["SELL", anchors[symbol] + 100]] as const) {
-        const orderId = book.peekNextOrderId(); const quantity = 50; const input: OrderInput = { traderId: makerId, symbol, side, type: "LIMIT", quantity, pricePaise };
+      const anchor = anchors[symbol];
+      const spread = anchor >= 100000 ? 500 : anchor >= 1000 ? 10 : 1;
+      const buyPrice = Math.max(1, anchor - spread);
+      const sellPrice = anchor + spread;
+      for (const [side, pricePaise] of [["BUY", buyPrice], ["SELL", sellPrice]] as const) {
+        const maxOrderRes = await client.query("select coalesce(max(order_id), 0)::int as max_id from mf_orders where symbol=$1", [symbol]);
+        const maxDbId = Number(maxOrderRes.rows[0]?.max_id ?? 0);
+        const orderId = Math.max(maxDbId + 1, book.peekNextOrderId());
+        const quantity = 50;
+        const input: OrderInput = { traderId: makerId, symbol, side, type: "LIMIT", quantity, pricePaise, ...({ orderId } as any) };
         const reserveCash = side === "BUY" ? pricePaise * quantity : 0; const reserveShares = side === "SELL" ? quantity : 0;
         if (reserveCash) await client.query("update mf_wallets set available_cash_paise=available_cash_paise-$2,reserved_cash_paise=reserved_cash_paise+$2 where user_id=$1", [makerId, reserveCash]);
         if (reserveShares) await client.query("update mf_positions set available_shares=available_shares-$3,reserved_shares=reserved_shares+$3 where user_id=$1 and symbol=$2", [makerId, symbol, reserveShares]);
@@ -372,11 +383,11 @@ async function ensureAccount(client: PoolClient, user: Principal, maker = false)
       await client.query("insert into mf_users(id,email,display_name) values($1,$2,$3) on conflict(id) do update set display_name=excluded.display_name", [user.id, email, name]);
     }
   }
-  await client.query("insert into mf_wallets(user_id,available_cash_paise,reserved_cash_paise) values($1,$2,0) on conflict(user_id) do nothing", [user.id, maker ? 1_000_000_000_000 : 10_000_000]);
+  await client.query("insert into mf_wallets(user_id,available_cash_paise,reserved_cash_paise) values($1,$2,0) on conflict(user_id) do nothing", [user.id, maker ? 1_000_000_000_000 : 50_000_000]);
   for (const symbol of symbols) {
-    const quantity = maker ? 1_000_000 : 10;
+    const quantity = maker ? 1_000_000 : 0;
     const inserted = await client.query("insert into mf_positions(user_id,symbol,available_shares,reserved_shares) values($1,$2,$3,0) on conflict(user_id,symbol) do nothing returning symbol", [user.id, symbol, quantity]);
-    if (inserted.rowCount) await client.query("insert into mf_portfolio_lots(user_id,symbol,quantity,unit_cost_paise) values($1,$2,$3,$4)", [user.id, symbol, quantity, anchors[symbol]]);
+    if (inserted.rowCount && quantity > 0) await client.query("insert into mf_portfolio_lots(user_id,symbol,quantity,unit_cost_paise) values($1,$2,$3,$4)", [user.id, symbol, quantity, anchors[symbol]]);
   }
 }
 async function loadBook(client: PoolClient, symbol: string) {

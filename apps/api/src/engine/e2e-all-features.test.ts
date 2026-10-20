@@ -60,19 +60,19 @@ async function runE2ETests() {
   assert.equal(accountRes.status, 200);
   const account = await accountRes.json();
   assert.equal(account.user.email, testEmail);
-  assert.equal(account.wallet.availableCashPaise, 10_000_000, "Initial demo cash should be ₹100,000.00 (10,000,000 paise)");
+  assert.equal(account.wallet.availableCashPaise, 50_000_000, "Initial demo cash should be $500,000.00 (50,000,000 cents)");
   assert.equal(account.wallet.reservedCashPaise, 0);
   assert.equal(account.positions.length, 7);
   for (const pos of account.positions) {
-    assert.equal(pos.availableUnits, 10, `${pos.symbol} should start with 10 units`);
+    assert.equal(pos.availableUnits, 0, `${pos.symbol} should start with 0 units`);
     assert.equal(pos.reservedUnits, 0);
-    assert.equal(pos.units, 10);
+    assert.equal(pos.units, 0);
   }
   assert.equal(account.realizedPaise, 0, "Initial realized P/L should be 0");
-  console.log("  ✔ Account bootstrap verified: ₹100,000 cash, 10 units each in 7 assets (including BTC & ETH), 0 realized P&L.");
+  console.log("  ✔ Account bootstrap verified: $500,000 cash, 0 units held in all 7 assets, 0 realized P&L.");
 
   // 5. Order Book Snapshots
-  console.log("\n[5/9] Testing /api/books and /api/books/DOGE, /api/books/BTC, /api/books/ETHUSD...");
+  console.log("\n[5/9] Testing /api/books and /api/books/DOGE, /api/books/BTC, /api/books/ETH...");
   const booksRes = await fetch(`${API_BASE}/api/books`, { headers: authHeaders });
   assert.equal(booksRes.status, 200);
   const books = await booksRes.json();
@@ -104,9 +104,9 @@ async function runE2ETests() {
 
   // 6. Limit Order Placement & Reserve Logic
   console.log("\n[6/9] Placing Resting LIMIT BUY order (below market) & verifying cash reserve...");
-  const restingPrice = 1800; // ₹18.00 (below maker bid ₹19.00)
+  const restingPrice = 5; // $0.05 (below maker bid)
   const restingQty = 5;
-  const expectedReserve = restingPrice * restingQty; // 9,000 paise = ₹90.00
+  const expectedReserve = restingPrice * restingQty; // 25 cents
 
   const placeRes = await fetch(`${API_BASE}/api/orders`, {
     method: "POST",
@@ -122,8 +122,8 @@ async function runE2ETests() {
   // Verify wallet reserved funds
   const accAfterOrder = await (await fetch(`${API_BASE}/api/account`, { headers: authHeaders })).json();
   assert.equal(accAfterOrder.wallet.reservedCashPaise, expectedReserve, "Reserved cash should match order value");
-  assert.equal(accAfterOrder.wallet.availableCashPaise, 10_000_000 - expectedReserve, "Available cash should be reduced by reserve");
-  console.log(`  ✔ Order #${restingOrderId} placed: ₹${expectedReserve / 100} reserved from cash balance.`);
+  assert.equal(accAfterOrder.wallet.availableCashPaise, 50_000_000 - expectedReserve, "Available cash should be reduced by reserve");
+  console.log(`  ✔ Order #${restingOrderId} placed: $${expectedReserve / 100} reserved from cash balance.`);
 
   // 7. Order Cancellation & Reserve Refund
   console.log("\n[7/9] Cancelling order & verifying reserve refund...");
@@ -137,14 +137,14 @@ async function runE2ETests() {
 
   const accAfterCancel = await (await fetch(`${API_BASE}/api/account`, { headers: authHeaders })).json();
   assert.equal(accAfterCancel.wallet.reservedCashPaise, 0, "Reserved cash should return to 0");
-  assert.equal(accAfterCancel.wallet.availableCashPaise, 10_000_000, "Available cash should be fully refunded");
-  console.log(`  ✔ Order #${restingOrderId} cancelled: ₹${expectedReserve / 100} refunded cleanly to available cash.`);
+  assert.equal(accAfterCancel.wallet.availableCashPaise, 50_000_000, "Available cash should be fully refunded");
+  console.log(`  ✔ Order #${restingOrderId} cancelled: $${expectedReserve / 100} refunded cleanly to available cash.`);
 
   // Verify ETH order placement and cancellation
   const ethOrderRes = await fetch(`${API_BASE}/api/orders`, {
     method: "POST",
     headers: authHeaders,
-    body: JSON.stringify({ symbol: "ETH", side: "BUY", type: "LIMIT", quantity: 1, pricePaise: 2400000 }),
+    body: JSON.stringify({ symbol: "ETH", side: "BUY", type: "LIMIT", quantity: 1, pricePaise: 230000 }),
   });
   assert.ok([200, 201].includes(ethOrderRes.status));
   const ethOrderData = await ethOrderRes.json();
@@ -160,7 +160,7 @@ async function runE2ETests() {
   const btcOrderRes = await fetch(`${API_BASE}/api/orders`, {
     method: "POST",
     headers: authHeaders,
-    body: JSON.stringify({ symbol: "BTC", side: "BUY", type: "LIMIT", quantity: 1, pricePaise: 7400000 }),
+    body: JSON.stringify({ symbol: "BTC", side: "BUY", type: "LIMIT", quantity: 1, pricePaise: 8000000 }),
   });
   assert.ok([200, 201].includes(btcOrderRes.status));
   const btcOrderData = await btcOrderRes.json();
@@ -173,10 +173,22 @@ async function runE2ETests() {
   console.log("  ✔ BTC order placement and cancellation verified successfully.");
 
   // 8. Trade Execution & FIFO P/L Calculation
-  console.log("\n[8/9] Executing SELL trade against maker bid to verify FIFO Realized P/L...");
-  // Check current best bid on DOGE
+  console.log("\n[8/9] Buying units then executing SELL trade against maker bid to verify FIFO Realized P/L...");
+  // Buy 5 DOGE against maker ask first
   const freshDoge = await (await fetch(`${API_BASE}/api/books/DOGE`, { headers: authHeaders })).json();
-  const executeBidPrice = freshDoge.bestBid;
+  const buyPrice = freshDoge.bestAsk;
+  const buyRes = await fetch(`${API_BASE}/api/orders`, {
+    method: "POST",
+    headers: authHeaders,
+    body: JSON.stringify({ symbol: "DOGE", side: "BUY", type: "LIMIT", quantity: 5, pricePaise: buyPrice }),
+  });
+  assert.ok([200, 201].includes(buyRes.status));
+  const buyData = await buyRes.json();
+  assert.equal(buyData.trades.length, 1);
+
+  // Check current best bid on DOGE and sell 2 units
+  const dogeBeforeSell = await (await fetch(`${API_BASE}/api/books/DOGE`, { headers: authHeaders })).json();
+  const executeBidPrice = dogeBeforeSell.bestBid;
   const sellRes = await fetch(`${API_BASE}/api/orders`, {
     method: "POST",
     headers: authHeaders,
@@ -192,22 +204,22 @@ async function runE2ETests() {
   // Check account post-trade
   const accAfterTrade = await (await fetch(`${API_BASE}/api/account`, { headers: authHeaders })).json();
   const dogePos = accAfterTrade.positions.find((p: any) => p.symbol === "DOGE");
-  assert.equal(dogePos.units, 8, "Position should decrease from 10 to 8 units");
+  assert.equal(dogePos.units, 3, "Position should decrease from 5 to 3 units");
   // Trade proceeds = 2 * executeBidPrice
   const tradeProceeds = 2 * executeBidPrice;
-  // Starting basis was 2 * 2000 = 4000
-  const costBasis = 2 * 2000;
+  // Cost basis was 2 * buyPrice
+  const costBasis = 2 * buyPrice;
   const expectedPnl = tradeProceeds - costBasis;
-  assert.equal(accAfterTrade.realizedPaise, expectedPnl, `Realized P/L should be ${expectedPnl} paise`);
-  console.log(`  ✔ Trade executed: 2 DOGE @ ₹${trade.pricePaise / 100}. Realized P/L = ₹${expectedPnl / 100} (cost basis ₹${costBasis / 100} vs proceeds ₹${tradeProceeds / 100}).`);
+  assert.equal(accAfterTrade.realizedPaise, expectedPnl, `Realized P/L should be ${expectedPnl} cents`);
+  console.log(`  ✔ Trade executed: 2 DOGE @ $${trade.pricePaise / 100}. Realized P/L = $${expectedPnl / 100} (cost basis $${costBasis / 100} vs proceeds $${tradeProceeds / 100}).`);
 
   // 9. Replay Benchmark Comparison
   console.log("\n[9/9] Testing /api/replay engine benchmark...");
   const replayCsv = `side,type,pricePaise,quantity
-BUY,LIMIT,1920,20
-SELL,LIMIT,2080,20
-BUY,LIMIT,2080,10
-SELL,LIMIT,1920,15
+BUY,LIMIT,7,20
+SELL,LIMIT,9,20
+BUY,LIMIT,9,10
+SELL,LIMIT,7,15
 `;
   const replayRes = await fetch(`${API_BASE}/api/replay?symbol=DOGE`, {
     method: "POST",
