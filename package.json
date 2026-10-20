@@ -1,0 +1,21 @@
+{
+  "name": "marketforge",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev:api\" \"npm run dev -w @marketforge/web\"",
+    "dev:api": "npx --yes neon@latest dev --source apps/api/src/function.ts --port 3001 --env .env.functions",
+    "build": "npm run build -w @marketforge/api && npm run build -w @marketforge/web",
+    "test": "npm run test -w @marketforge/api"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "dependencies": {
+    "@neon/config": "^1.9.2",
+    "@neon/env": "^1.6.3",
+    "drizzle-orm": "^0.45.4"
+  }
+}
