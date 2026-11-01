@@ -32,3 +32,13 @@ export type Account = { user: { id: string; email: string; name: string }; walle
 export type OrderRow = { symbol: string; order_id: number; side: "BUY" | "SELL"; type: "LIMIT" | "MARKET"; limit_price_paise: number | string | null; original_quantity: number; remaining_quantity: number; status: string; created_at: string };
 export type TradeRow = { symbol: string; trade_id: number; price_paise: number | string; quantity: number; buyer_id: string; seller_id: string; created_at: string };
 export const money = (cents?: number) => cents === undefined || isNaN(cents) ? "—" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
+
+/** Dollars typed by a person, converted without binary floating-point cents. */
+export function usdToPaise(text: string): number | null {
+  const trimmed = text.trim();
+  if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) return null;
+  const [dollars, cents = ""] = trimmed.split(".");
+  const paise = Number(dollars) * 100 + Number((cents + "00").slice(0, 2));
+  if (!Number.isSafeInteger(paise) || paise <= 0 || paise > 1_000_000_000) return null;
+  return paise;
+}

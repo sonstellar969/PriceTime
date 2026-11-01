@@ -6,12 +6,14 @@ The chart widget uses exchange-qualified crypto symbols such as `BINANCE:DOGEUSD
 
 **Live site:** https://sonstellar969.github.io/PriceTime/
 
+The public page opens on the structures desk. That desk runs the matching engine in the browser on a workload you type, and shows the price tree, the FIFO queue at a price, the trade-price ring, the action stack, the execution tape, and binary search by order id. Sign-in is for the persistent trade desk.
+
 **Repository:** https://github.com/sonstellar969/PriceTime
 **Neon API:** `https://br-nameless-forest-ao724sdq-api.compute.c-2.ap-southeast-1.aws.neon.tech/`
 
 ## What is implemented
 
-- Responsive React + TypeScript web app with Trade, Portfolio, Reports, and Replay views.
+- Responsive React + TypeScript web app with a public structures desk, plus Trade, Portfolio, Reports, and Replay.
 - Neon Managed Auth email/password sign-up, sign-in, session restore, and sign-out.
 - First login provisions a $500,000 demo wallet (starts with 0 crypto holdings until purchased).
 - PostgreSQL persistence for profiles, demo wallets, reserved money/units, positions, FIFO lots, orders, executions, order events, realized P/L, and replay runs.

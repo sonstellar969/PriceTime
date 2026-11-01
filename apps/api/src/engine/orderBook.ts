@@ -9,6 +9,8 @@ export interface OrderInput { traderId: string; symbol: string; side: Side; type
 export interface Order extends OrderInput { id: number; createdAt: number; remaining: number; status: OrderStatus; prev?: Order; next?: Order; level?: PriceLevel }
 export interface Trade { id: number; symbol: string; pricePaise: number; quantity: number; buyOrderId: number; sellOrderId: number; buyerId: string; sellerId: string; createdAt: number; next?: Trade }
 export interface LevelView { pricePaise: number; quantity: number; orderCount: number }
+export interface QueueOrder { id: number; traderId: string; remaining: number; side: Side }
+export interface PriceNodeView { pricePaise: number; quantity: number; orders: QueueOrder[]; left?: PriceNodeView; right?: PriceNodeView }
 
 export interface OrderAction {
   kind: "SUBMIT" | "CANCEL";
@@ -40,6 +42,13 @@ export class PriceTree {
   delete(node: PriceLevel) { if (!node.left) this.transplant(node, node.right); else if (!node.right) this.transplant(node, node.left); else { const successor = this.minimum(node.right)!; if (successor.parent !== node) { this.transplant(successor, successor.right); successor.right = node.right; successor.right!.parent = successor; } this.transplant(node, successor); successor.left = node.left; successor.left!.parent = successor; } }
   levelsAscending(limit = 5) { const result: PriceLevel[] = []; const visit = (node?: PriceLevel) => { if (!node || result.length >= limit) return; visit(node.left); if (result.length < limit) result.push(node); visit(node.right); }; visit(this.root); return result; }
   levelsDescending(limit = 5) { const result: PriceLevel[] = []; const visit = (node?: PriceLevel) => { if (!node || result.length >= limit) return; visit(node.right); if (result.length < limit) result.push(node); visit(node.left); }; visit(this.root); return result; }
+  dump(): PriceNodeView | undefined { return this.dumpNode(this.root); }
+  private dumpNode(node?: PriceLevel): PriceNodeView | undefined {
+    if (!node) return undefined;
+    const orders: QueueOrder[] = [];
+    for (let order = node.head; order; order = order.next) orders.push({ id: order.id, traderId: order.traderId, remaining: order.remaining, side: order.side });
+    return { pricePaise: node.pricePaise, quantity: node.quantity, orders, left: this.dumpNode(node.left), right: this.dumpNode(node.right) };
+  }
 }
 
 /** Matching engine. Persist completed changes outside this class; keep matching in memory. */
@@ -71,7 +80,11 @@ export class OrderBook {
     const id = typeof (input as any).orderId === "number" ? (input as any).orderId : this.nextOrderId++;
     this.nextOrderId = Math.max(this.nextOrderId, id + 1);
     const order: Order = { ...input, id, createdAt: Date.now(), remaining: input.quantity, status: "OPEN" };
-    this.orders.push(order); const trades: Trade[] = [];
+    if (this.orders.some(existing => existing.id === id)) throw new Error("Duplicate order id");
+    const insertAt = this.orders.findIndex(existing => existing.id > id);
+    if (insertAt === -1) this.orders.push(order);
+    else this.orders.splice(insertAt, 0, order);
+    const trades: Trade[] = [];
     const changedOrders = new Set<Order>([order]);
     while (order.remaining > 0) {
       const opposite = order.side === "BUY" ? this.sellTree.minimum() : this.buyTree.maximum();
@@ -119,4 +132,18 @@ export class OrderBook {
   movingAverage() { return this.recentPrices.average(); }
   private view = (level: PriceLevel): LevelView => ({ pricePaise: level.pricePaise, quantity: level.quantity, orderCount: level.orderCount });
   trades() { const output: Trade[] = []; for (let trade = this.tradeHead; trade; trade = trade.next) output.push(trade); return output; }
+  /** Plain view of the structures the matcher is using right now. */
+  structure() {
+    return {
+      bids: this.buyTree.dump(),
+      asks: this.sellTree.dump(),
+      ring: this.recentPrices.toArray(),
+      average: this.movingAverage(),
+      actions: this.getActionHistory(),
+      trades: this.trades().map(trade => ({ id: trade.id, pricePaise: trade.pricePaise, quantity: trade.quantity, buyerId: trade.buyerId, sellerId: trade.sellerId })),
+      orders: this.orders.map(order => ({ id: order.id, traderId: order.traderId, side: order.side, status: order.status, remaining: order.remaining, pricePaise: order.pricePaise })),
+      bestBid: this.buyTree.maximum()?.pricePaise,
+      bestAsk: this.sellTree.minimum()?.pricePaise
+    };
+  }
 }

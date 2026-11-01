@@ -41,3 +41,15 @@ test("circular moving average keeps only the 20 newest execution prices", () => 
   }
   assert.equal(book.snapshot().movingAveragePaise, 10011);
 });
+
+test("order ids stay sorted so binary search still finds an out-of-order insert", () => {
+  const book = new OrderBook("BTC");
+  book.submit({ traderId: "later", symbol: "BTC", side: "BUY", type: "LIMIT", quantity: 1, pricePaise: 10000, orderId: 5 } as never);
+  book.submit({ traderId: "earlier", symbol: "BTC", side: "BUY", type: "LIMIT", quantity: 1, pricePaise: 9000, orderId: 2 } as never);
+  assert.deepEqual(book.allOrders().map(order => order.id), [2, 5]);
+  assert.equal(book.findOrder(2)?.traderId, "earlier");
+  assert.equal(book.findOrder(5)?.traderId, "later");
+  const view = book.structure();
+  assert.equal(view.bestBid, 10000);
+  assert.equal(view.bids?.orders[0].traderId, "later");
+});

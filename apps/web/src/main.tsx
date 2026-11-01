@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
-import { Activity, BarChart3, CandlestickChart, CircleDollarSign, LayoutDashboard, LogOut, Play, Wallet } from "lucide-react";
+import { BarChart3, CandlestickChart, CircleDollarSign, LayoutDashboard, LogOut, Network, Play, Wallet } from "lucide-react";
 import { authClient } from "./lib/auth";
-import { cancelOrder, getAccount, getBook, getOrders, getTrades, money, runReplay, sendOrder, type Account, type Book, type OrderRow, type TradeRow } from "./lib/api";
-import { linearSearch } from "./algorithms/search";
+import { cancelOrder, getAccount, getBook, getOrders, getTrades, money, runReplay, sendOrder, usdToPaise, type Account, type Book, type OrderRow, type TradeRow } from "./lib/api";
+import { binarySearchTrace, linearSearch } from "./algorithms/search";
 import { bubbleSort, selectionSort, insertionSort, mergeSort, quickSort } from "./algorithms/sorts";
+import { PublicLab, StructuresLab } from "./structures/Lab";
 import "./styles.css";
 
 // Trigger early background warmup of Neon serverless Postgres & API compute
@@ -20,7 +21,7 @@ const symbols = [
   { symbol: "TRX", name: "TRON", market: "BINANCE", anchor: 33 },
   { symbol: "AVAX", name: "Avalanche", market: "BINANCE", anchor: 943 },
 ];
-type Page = "Trade" | "Portfolio" | "Reports" | "Replay";
+type Page = "Trade" | "Portfolio" | "Reports" | "Replay" | "Structures";
 type SortName = "Bubble" | "Selection" | "Insertion" | "Merge" | "Quick";
 
 function App() {
@@ -29,6 +30,8 @@ function App() {
   const [showAllOpenOrders, setShowAllOpenOrders] = useState(false);
   const [side, setSide] = useState<"BUY" | "SELL">("BUY"); const [type, setType] = useState<"LIMIT" | "MARKET">("LIMIT"); const [quantity, setQuantity] = useState(1); const [price, setPrice] = useState("81500.00"); const [busy, setBusy] = useState(false); const [notice, setNotice] = useState("");
   const [livePrices, setLivePrices] = useState<Record<string, number>>({});
+  const [entry, setEntry] = useState<"lab" | "auth">("lab");
+  const [lookupId, setLookupId] = useState("");
   const current = symbols.find(item => item.symbol === symbol) ?? symbols[0];
 
   useEffect(() => {
@@ -81,20 +84,33 @@ function App() {
   useEffect(() => { if (session?.user) void refresh(); else { setAccount(undefined); setBook(undefined); } }, [session?.user?.id, symbol]);
   useEffect(() => { if (!session?.user) return; const timer = window.setInterval(() => { void getBook(symbol).then(setBook).catch(() => undefined); void getAccount().then(acc => { setAccount(acc); if (acc?.orders) setOrders(acc.orders); }).catch(() => undefined); }, 3000); return () => window.clearInterval(timer); }, [session?.user?.id, symbol]);
   useEffect(() => {
-    const refPrice = book?.lastPricePaise ?? livePrices[symbol] ?? current.anchor;
+    const anchor = symbols.find(item => item.symbol === symbol)?.anchor ?? 0;
+    const refPrice = livePrices[symbol] ?? anchor;
     setPrice((refPrice / 100).toFixed(2));
-  }, [symbol, livePrices[symbol]]);
+    // Suggested price changes with the symbol, not with each live tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbol]);
   async function submitOrder(event: FormEvent) {
     event.preventDefault();
-    setBusy(true);
     setNotice("");
+    if (!Number.isInteger(quantity) || quantity <= 0) {
+      setNotice("Quantity has to be a positive whole number.");
+      return;
+    }
+    const parsed = type === "LIMIT" ? usdToPaise(price) : undefined;
+    if (type === "LIMIT" && parsed == null) {
+      setNotice("Limit price needs dollars and at most two cents, such as 100.50.");
+      return;
+    }
+    const pricePaise = parsed ?? undefined;
+    setBusy(true);
     try {
       const result = await sendOrder({
         symbol,
         side,
         type,
         quantity,
-        pricePaise: type === "LIMIT" ? Math.round(Number(price) * 100) : undefined
+        pricePaise
       });
       setBook(result.snapshot);
       const fills = result.trades.length;
@@ -124,10 +140,13 @@ function App() {
     }
   }
   async function signOut() { await authClient.signOut(); setNotice("Signed out."); }
-  if (checkingSession) return <div className="loading-screen">Connecting to PriceTime…</div>;
-  if (!session?.user) return <AuthScreen notice={notice} setNotice={setNotice}/>;
+  if (!session?.user) {
+    if (checkingSession && entry === "auth") return <div className="loading-screen">Connecting to PriceTime…</div>;
+    if (entry === "auth") return <AuthScreen notice={notice} setNotice={setNotice} onLab={() => setEntry("lab")} />;
+    return <PublicLab onSignIn={() => { setNotice(""); setEntry("auth"); }} />;
+  }
   return <main className="app-shell">
-    <aside className="sidebar"><a className="brand" href="#trade" onClick={() => setPage("Trade")}><CandlestickChart/><span>price<span>time</span></span></a><nav aria-label="Main navigation">{(["Trade", "Portfolio", "Reports", "Replay"] as Page[]).map((item, index) => { const Icon = [LayoutDashboard, Wallet, BarChart3, Play][index]; return <button key={item} className={page === item ? "nav-item active" : "nav-item"} onClick={() => setPage(item)}><Icon/>{item}</button>; })}</nav><div className="paper-note"><CircleDollarSign/><p>Paper account<br/><small>Demo cash · no real funds</small></p></div><button className="logout" onClick={signOut}><LogOut/> Sign out</button></aside>
+    <aside className="sidebar"><a className="brand" href="#trade" onClick={() => setPage("Trade")}><CandlestickChart/><span>price<span>time</span></span></a><nav aria-label="Main navigation">{(["Trade", "Portfolio", "Reports", "Replay", "Structures"] as Page[]).map((item, index) => { const Icon = [LayoutDashboard, Wallet, BarChart3, Play, Network][index]; return <button key={item} className={page === item ? "nav-item active" : "nav-item"} onClick={() => setPage(item)}><Icon/>{item}</button>; })}</nav><div className="paper-note"><CircleDollarSign/><p>Paper account<br/><small>Demo cash · no real funds</small></p></div><button className="logout" onClick={signOut}><LogOut/> Sign out</button></aside>
     <section className="workspace"><header className="topbar"><div><p className="eyebrow">CRYPTO PAPER EXCHANGE</p><h1>{page === "Trade" ? "Trade desk" : page}</h1></div><div className="account-pill"><span className="status-dot"/>{session.user.name || session.user.email}<button type="button" onClick={signOut}>Sign out</button></div></header>
       <div className="ticker-strip">
         {symbols.map(item => {
@@ -160,9 +179,9 @@ function App() {
             <Metric label={`Unrealized P/L (${symbol})`} value={money(currentUnrealized)} tone={currentUnrealized >= 0 ? "green" : "red"}/>
             <Metric label={`Holding (${symbol})`} value={`${currentUnits} units`}/>
           </div>
-          <div className="dashboard-grid"><section className="panel chart-panel"><div className="panel-heading"><div><h2>{current.name} <span className="symbol-tag">{symbol}</span></h2><p>Binance crypto chart</p></div><span className="live-tag"><i/> LIVE CHART</span></div><TradingViewChart symbol={symbol}/><div className="market-note">TradingView charts live Binance crypto pairs in USDT. Simulated order execution matching against real market liquidity.</div></section>
+          <div className="dashboard-grid"><section className="panel chart-panel"><div className="panel-heading"><div><h2>{current.name} <span className="symbol-tag">{symbol}</span></h2><p>Binance crypto chart</p></div><span className="live-tag"><i/> LIVE CHART</span></div><TradingViewChart symbol={symbol}/><div className="market-note">The chart is Binance market data. Orders match only inside this paper book, not against that liquidity.</div></section>
             <section className="panel ticket"><div className="panel-heading"><h2>Place order</h2><span>{money(account?.wallet.availableCashPaise)} available</span></div><form onSubmit={submitOrder}><div className="side-toggle"><button type="button" className={side === "BUY" ? "active buy" : ""} onClick={() => setSide("BUY")}>Buy</button><button type="button" className={side === "SELL" ? "active sell" : ""} onClick={() => setSide("SELL")}>Sell</button></div><label htmlFor="order-type">Order type</label><select id="order-type" value={type} onChange={event => setType(event.target.value as "LIMIT" | "MARKET")}><option value="LIMIT">Limit</option><option value="MARKET">Market</option></select><label htmlFor="order-quantity">Quantity <small>Available: {account?.positions.find(position => position.symbol === symbol)?.availableUnits ?? 0} units</small></label><input id="order-quantity" min="1" step="1" type="number" value={quantity} onChange={event => setQuantity(Number(event.target.value))}/>{type === "LIMIT" && <><label htmlFor="limit-price">Limit price <small>$ USD</small></label><input id="limit-price" inputMode="decimal" min="0.01" step="0.01" type="number" value={price} onChange={event => setPrice(event.target.value)}/></>}<button className={`submit-order ${side.toLowerCase()}`} disabled={busy}>{busy ? "Working…" : `Place ${side.toLowerCase()} order`}</button><p className="demo-disclaimer">Simulated fills only. This does not route to a real exchange.</p></form></section>
-            <OrderBook book={book}/><section className="panel trade-tape"><div className="panel-heading"><h2>Recent executions</h2><span>20-trade average: {money(book?.movingAveragePaise)}</span></div><TradeTable trades={book?.recentTrades?.map(trade => ({ symbol, trade_id: trade.id, price_paise: trade.pricePaise, quantity: trade.quantity, buyer_id: trade.buyerId, seller_id: trade.sellerId, created_at: new Date(trade.createdAt).toISOString() })) ?? []}/></section>
+            <OrderBook book={book}/><section className="panel trade-tape"><div className="panel-heading"><h2>Recent executions</h2><span>20-trade average: {money(book?.movingAveragePaise)}</span></div><TradeTable limit={20} trades={book?.recentTrades?.map(trade => ({ symbol, trade_id: trade.id, price_paise: trade.pricePaise, quantity: trade.quantity, buyer_id: trade.buyerId, seller_id: trade.sellerId, created_at: new Date(trade.createdAt).toISOString() })) ?? []}/></section>
             <section className="panel orders-panel">
               <div className="panel-heading">
                 <div>
@@ -201,16 +220,16 @@ function App() {
           </div>
         </>;
       })()}
-      {page === "Portfolio" && <Portfolio account={account} onCancel={doCancel} busy={busy}/>}{page === "Reports" && <Reports trades={trades}/>}{page === "Replay" && <Replay symbol={symbol} setNotice={setNotice}/>}
+      {page === "Portfolio" && <Portfolio account={account} onCancel={doCancel} busy={busy}/>}{page === "Reports" && <Reports trades={trades} lookupId={lookupId} setLookupId={setLookupId}/>}{page === "Replay" && <Replay symbol={symbol} setNotice={setNotice}/>}{page === "Structures" && <StructuresLab/>}
       <p className="notice" aria-live="polite">{notice}</p><footer className="site-footer">PriceTime is a classroom paper-trading simulator. No deposits, withdrawals, or real crypto transactions. <a href="https://www.tradingview.com/" target="_blank" rel="noreferrer">Charts by TradingView</a>.</footer>
     </section>
   </main>;
 }
 
-function AuthScreen({ notice, setNotice }: { notice: string; setNotice: (message: string) => void }) {
+function AuthScreen({ notice, setNotice, onLab }: { notice: string; setNotice: (message: string) => void; onLab: () => void }) {
   const [register, setRegister] = useState(false); const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [busy, setBusy] = useState(false);
   async function submit(event: FormEvent) { event.preventDefault(); setBusy(true); setNotice(""); try { const result = register ? await authClient.signUp.email({ email, password, name }) : await authClient.signIn.email({ email, password }); if (result.error) throw new Error(result.error.message || "Authentication failed."); setNotice(register ? "Account created. Your demo wallet is ready." : "Welcome back."); } catch (error) { setNotice(error instanceof Error ? error.message : "Authentication failed."); } finally { setBusy(false); } }
-  return <main className="auth-shell"><div className="auth-card"><a className="brand" href="#"><CandlestickChart/><span>price<span>time</span></span></a><p className="eyebrow">PAPER TRADING EXCHANGE</p><h1>{register ? "Create your trader account" : "Welcome back"}</h1><p className="auth-copy">Practice price-time trading with a real order book and demo funds.</p><form onSubmit={submit}>{register && <><label htmlFor="auth-name">Display name</label><input id="auth-name" required value={name} onChange={event => setName(event.target.value)} autoComplete="name"/></>}<label htmlFor="auth-email">Email</label><input id="auth-email" type="email" required value={email} onChange={event => setEmail(event.target.value)} autoComplete="email"/><label htmlFor="auth-password">Password</label><input id="auth-password" type="password" minLength={8} required value={password} onChange={event => setPassword(event.target.value)} autoComplete={register ? "new-password" : "current-password"}/><button className="submit-order buy" disabled={busy}>{busy ? "Please wait…" : register ? "Create account" : "Sign in"}</button></form><button className="text-action" onClick={() => setRegister(!register)}>{register ? "Already have an account? Sign in" : "New to PriceTime? Create an account"}</button><p className="auth-demo">New accounts receive $500,000 demo cash to trade all crypto pairs.</p>{notice && <p className="auth-notice" role="status">{notice}</p>}</div></main>;
+  return <main className="auth-shell"><div className="auth-card"><a className="brand" href="#"><CandlestickChart/><span>price<span>time</span></span></a><p className="eyebrow">PAPER TRADING EXCHANGE</p><h1>{register ? "Create your trader account" : "Welcome back"}</h1><p className="auth-copy">Practice price-time trading with a real order book and demo funds.</p><form onSubmit={submit}>{register && <><label htmlFor="auth-name">Display name</label><input id="auth-name" required value={name} onChange={event => setName(event.target.value)} autoComplete="name"/></>}<label htmlFor="auth-email">Email</label><input id="auth-email" type="email" required value={email} onChange={event => setEmail(event.target.value)} autoComplete="email"/><label htmlFor="auth-password">Password</label><input id="auth-password" type="password" minLength={8} required value={password} onChange={event => setPassword(event.target.value)} autoComplete={register ? "new-password" : "current-password"}/><button className="submit-order buy" disabled={busy}>{busy ? "Please wait…" : register ? "Create account" : "Sign in"}</button></form><button className="text-action" onClick={() => setRegister(!register)}>{register ? "Already have an account? Sign in" : "New to PriceTime? Create an account"}</button><button className="text-action" type="button" onClick={onLab}>Look at the structures desk</button><p className="auth-demo">New accounts receive $500,000 demo cash to trade all crypto pairs.</p>{notice && <p className="auth-notice" role="status">{notice}</p>}</div></main>;
 }
 
 function TradingViewChart({ symbol }: { symbol: string }) {
@@ -267,7 +286,7 @@ function TradingViewChart({ symbol }: { symbol: string }) {
 }
 function Metric({ label, value, tone }: { label: string; value: string; tone?: string }) { return <article className="metric"><p>{label}</p><strong className={tone ?? ""}>{value}</strong></article>; }
 function OrderBook({ book }: { book?: Book }) { return <section className="panel order-book"><div className="panel-heading"><h2>Order book</h2><span>Top five levels · aggregated</span></div><div className="depth-head"><span>Price ($)</span><span>Qty</span></div><div className="levels asks">{[...(book?.asks ?? [])].reverse().map(level => <div className="depth-row" key={level.pricePaise}><span>{money(level.pricePaise)}</span><span>{level.quantity}</span><i style={{ width: `${Math.min(100, level.quantity * 2)}%` }}/></div>)}{!book?.asks?.length && <p className="empty">No sell orders</p>}</div><div className="spread-line">Spread <b>{money(book?.spreadPaise)}</b></div><div className="levels bids">{book?.bids?.map(level => <div className="depth-row" key={level.pricePaise}><span>{money(level.pricePaise)}</span><span>{level.quantity}</span><i style={{ width: `${Math.min(100, level.quantity * 2)}%` }}/></div>)}{!book?.bids?.length && <p className="empty">No buy orders</p>}</div></section>; }
-function TradeTable({ trades }: { trades: TradeRow[] }) { return <div className="table-wrap"><table><thead><tr><th>Time</th><th>Price</th><th>Qty</th><th>Buyer → seller</th></tr></thead><tbody>{trades.length ? trades.slice(0, 20).map(trade => <tr key={`${trade.symbol}-${trade.trade_id}`}><td>{new Date(trade.created_at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</td><td>{money(Number(trade.price_paise))}</td><td>{trade.quantity}</td><td>{shortId(trade.buyer_id)} → {shortId(trade.seller_id)}</td></tr>) : <tr><td colSpan={4} className="empty-row">No trades yet. Submit a crossing order to create an execution.</td></tr>}</tbody></table></div>; }
+function TradeTable({ trades, limit }: { trades: TradeRow[]; limit?: number }) { const rows = limit ? trades.slice(0, limit) : trades; return <div className="table-wrap"><table><thead><tr><th>Time</th><th>Price</th><th>Qty</th><th>Buyer → seller</th></tr></thead><tbody>{rows.length ? rows.map(trade => <tr key={`${trade.symbol}-${trade.trade_id}`}><td>{new Date(trade.created_at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</td><td>{money(Number(trade.price_paise))}</td><td>{trade.quantity}</td><td>{shortId(trade.buyer_id)} → {shortId(trade.seller_id)}</td></tr>) : <tr><td colSpan={4} className="empty-row">No trades yet. Submit a crossing order to create an execution.</td></tr>}</tbody></table></div>; }
 function OrderList({ orders, onCancel, busy }: { orders: OrderRow[]; onCancel: (order: OrderRow) => void; busy: boolean }) {
   return <div className="table-wrap">
     <table>
@@ -349,12 +368,18 @@ function Portfolio({ account, onCancel, busy }: { account?: Account; onCancel: (
     </div>
   </section>;
 }
-function Reports({ trades }: { trades: TradeRow[] }) {
+function Reports({ trades, lookupId, setLookupId }: { trades: TradeRow[]; lookupId: string; setLookupId: (value: string) => void }) {
   const [query, setQuery] = useState(""); const [sort, setSort] = useState<SortName>("Merge"); const [sortBy, setSortBy] = useState<"price" | "quantity" | "time">("time"); const [result, setResult] = useState<{ items: TradeRow[]; ms: number }>();
   const matching = useMemo(
-    () => linearSearch(trades, trade => `${trade.buyer_id} ${trade.seller_id} ${trade.symbol}`.toLowerCase().includes(query.toLowerCase())),
+    () => linearSearch(trades, trade => `${trade.buyer_id} ${trade.seller_id} ${trade.symbol} ${trade.trade_id}`.toLowerCase().includes(query.toLowerCase())),
     [trades, query]
   );
+  const byId = useMemo(() => {
+    const copy = [...trades];
+    insertionSort(copy, (a, b) => Number(a.trade_id) - Number(b.trade_id));
+    return copy;
+  }, [trades]);
+  const trace = lookupId.trim() ? binarySearchTrace(byId, Number(lookupId), trade => Number(trade.trade_id)) : undefined;
   function runSort() {
     const copy = [...matching], start = performance.now();
     const key = (item: TradeRow) => sortBy === "price" ? Number(item.price_paise) : sortBy === "quantity" ? item.quantity : new Date(item.created_at).getTime();
@@ -368,7 +393,7 @@ function Reports({ trades }: { trades: TradeRow[] }) {
 
     setResult({ items: copy, ms: Number((performance.now() - start).toFixed(3)) });
   }
-  return <section className="content-panel"><div className="panel"><div className="panel-heading"><h2>Trade reports</h2><span>Linear search over your executions · {matching.length} found</span></div><div className="report-controls"><label>Search trader or symbol<input value={query} onChange={event => setQuery(event.target.value)} placeholder="e.g. DOGE or your ID"/></label><label>Sort field<select value={sortBy} onChange={event => setSortBy(event.target.value as typeof sortBy)}><option value="time">Time</option><option value="price">Price</option><option value="quantity">Quantity</option></select></label><label>Algorithm<select value={sort} onChange={event => setSort(event.target.value as SortName)}>{(["Bubble", "Selection", "Insertion", "Merge", "Quick"] as SortName[]).map(value => <option key={value}>{value}</option>)}</select></label><button className="secondary-action" onClick={runSort}>Sort report</button></div>{result && <p className="sort-result">{sort} sort · {result.items.length} records · {result.ms} ms</p>}<TradeTable trades={result?.items ?? matching}/></div></section>;
+  return <section className="content-panel"><div className="panel"><div className="panel-heading"><h2>Trade reports</h2><span>Linear search over your executions · {matching.length} found</span></div><div className="report-controls"><label>Linear search<input value={query} onChange={event => setQuery(event.target.value)} placeholder="trader, symbol, or trade id"/></label><label>Sort field<select value={sortBy} onChange={event => setSortBy(event.target.value as typeof sortBy)}><option value="time">Time</option><option value="price">Price</option><option value="quantity">Quantity</option></select></label><label>Algorithm<select value={sort} onChange={event => setSort(event.target.value as SortName)}>{(["Bubble", "Selection", "Insertion", "Merge", "Quick"] as SortName[]).map(value => <option key={value}>{value}</option>)}</select></label><button className="secondary-action" onClick={runSort}>Sort report</button></div><div className="report-controls"><label>Binary search by trade id<input value={lookupId} onChange={event => setLookupId(event.target.value)} inputMode="numeric" placeholder="trade id"/></label></div>{trace && <p className="sort-result">{trace.steps.map(step => `#${step.key} ${step.relation === "equal" ? "found" : step.relation === "less" ? "too small" : "too big"}`).join(" · ") || "No trades to search."}{trace.index >= 0 ? ` · ${trace.item?.symbol} at ${money(Number(trace.item?.price_paise))}` : lookupId.trim() ? " · not in your executions" : ""}</p>}{result && <p className="sort-result">{sort} sort · {result.items.length} records · {result.ms} ms</p>}<TradeTable trades={result?.items ?? matching}/></div></section>;
 }
 function Replay({ symbol, setNotice }: { symbol: string; setNotice: (message: string) => void }) { const [file, setFile] = useState<File>(); const [busy, setBusy] = useState(false); const [result, setResult] = useState<any>(); async function run(event: FormEvent) { event.preventDefault(); if (!file) return; setBusy(true); setResult(undefined); try { const response = await runReplay(symbol, await file.text()); setResult(response); setNotice("Replay completed and saved."); } catch (error) { setNotice(error instanceof Error ? error.message : "Replay failed."); } finally { setBusy(false); } }
   return <section className="content-panel"><div className="panel replay-panel"><div className="panel-heading"><div><h2>CSV engine replay</h2><p>Process up to 10,000 orders with the BST/DLL engine and a plain-array baseline.</p></div><span className="symbol-tag">{symbol}</span></div><p className="csv-help">CSV columns: <code>side,type,pricePaise,quantity</code>. Example: <code>BUY,LIMIT,148000,5</code>. Market row: <code>SELL,MARKET,,3</code>.</p><form onSubmit={run}><label htmlFor="replay-file">Order CSV</label><input id="replay-file" type="file" accept=".csv,text/csv" onChange={event => setFile(event.target.files?.[0])}/><button className="secondary-action" disabled={!file || busy}>{busy ? "Running benchmark…" : "Run replay"}</button></form>{result && <div className="benchmark-grid"><Benchmark name="BST + DLL" value={result.treeDll}/><Benchmark name="Plain array" value={result.plainArray}/><p className={result.equivalentTrades ? "green" : "red"}>{result.equivalentTrades ? "Execution sequences match" : "Execution sequences differ"} · {result.tradeCount} executions</p></div>}</div></section>;
